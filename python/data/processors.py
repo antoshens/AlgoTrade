@@ -1,11 +1,11 @@
 import numpy as np
 import pandas as pd
 
-def ticker_data_cleanup():
+def clean_ticker_data():
     """Clean up ticker history data by removing missing values and formatting columns."""
     ...
 
-def get_log_returns(stocks: pd.DataFrame | pd.Series | None) -> pd.DataFrame | pd.Series:
+def log_returns(stocks: pd.DataFrame | pd.Series | None) -> pd.DataFrame | pd.Series:
     """Calculate logarithmic daily returns for stock price data.
 
     Parameters
@@ -40,7 +40,7 @@ def get_log_returns(stocks: pd.DataFrame | pd.Series | None) -> pd.DataFrame | p
     
     return log_returns
 
-def get_overnight_gaps_prc(stocks: pd.DataFrame | None) -> pd.DataFrame:
+def overnight_gaps_prc(stocks: pd.DataFrame | None) -> pd.DataFrame:
     """Calculate the overnight price gap percentage between previous close and current open prices.
 
     Parameters
@@ -77,7 +77,7 @@ def get_overnight_gaps_prc(stocks: pd.DataFrame | None) -> pd.DataFrame:
     
     return overnight_gap.dropna() # type: ignore
 
-def get_rolling_overnight_gaps_std(stocks: pd.DataFrame | None, window: int) -> pd.DataFrame:
+def rolling_overnight_gaps_std(stocks: pd.DataFrame | None, window: int) -> pd.DataFrame:
     """Calculate the rolling standard deviation of overnight price gaps over a specified window.
 
     Parameters
@@ -92,11 +92,11 @@ def get_rolling_overnight_gaps_std(stocks: pd.DataFrame | None, window: int) -> 
     pd.DataFrame
         Rolling standard deviation of overnight gaps.
     """
-    overnight_gap = get_overnight_gaps_prc(stocks)
+    overnight_gap = overnight_gaps_prc(stocks)
 
     return overnight_gap.rolling(window).std()
 
-def get_intraday_return_prc(stocks: pd.DataFrame | None) -> pd.DataFrame:
+def intraday_returns_prc(stocks: pd.DataFrame | None) -> pd.DataFrame:
     """Calculate the intraday percentage log return between open and close prices.
 
     Parameters
@@ -133,7 +133,7 @@ def get_intraday_return_prc(stocks: pd.DataFrame | None) -> pd.DataFrame:
         
     return intraday_return.dropna() # type: ignore
 
-def get_daily_spread_pct(stocks: pd.DataFrame | None) -> pd.DataFrame:
+def daily_spread_pct(stocks: pd.DataFrame | None) -> pd.DataFrame:
     """Calculate the relative daily high-low price spread as a percentage of the close price.
 
     Parameters
@@ -172,7 +172,7 @@ def get_daily_spread_pct(stocks: pd.DataFrame | None) -> pd.DataFrame:
         
     return intraday_spread.dropna() # type: ignore
 
-def get_rolling_daily_spread_mean(stocks: pd.DataFrame | None, window: int) -> pd.DataFrame:
+def rolling_daily_spreads_mean(stocks: pd.DataFrame | None, window: int) -> pd.DataFrame:
     """Calculate the rolling mean of daily high-low price spreads over a specified window.
 
     Parameters
@@ -187,11 +187,11 @@ def get_rolling_daily_spread_mean(stocks: pd.DataFrame | None, window: int) -> p
     pd.DataFrame
         Rolling mean of high-low price spreads.
     """
-    intraday_spread = get_daily_spread_pct(stocks).dropna()
+    intraday_spread = daily_spread_pct(stocks).dropna()
         
     return intraday_spread.rolling(window).mean()
 
-def get_rolling_vol_daily(stocks: pd.DataFrame | pd.Series | None, window: int) -> pd.DataFrame | pd.Series:
+def rolling_vol_daily(stocks: pd.DataFrame | pd.Series | None, window: int) -> pd.DataFrame | pd.Series:
     """Calculate rolling daily volatility (standard deviation of log returns) over a specified window.
 
     Parameters
@@ -206,5 +206,5 @@ def get_rolling_vol_daily(stocks: pd.DataFrame | pd.Series | None, window: int) 
     pd.DataFrame | pd.Series
         Rolling daily volatility indexed by Date.
     """
-    log_returns = get_log_returns(stocks)
-    return log_returns.rolling(window).std().dropna()
+    returns = log_returns(stocks)
+    return returns.rolling(window).std().dropna()
