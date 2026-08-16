@@ -3,7 +3,7 @@ from datetime import datetime
 import pandas as pd
 import yfinance as yf
 
-def download_tickers_history(start_date: datetime, end_date: datetime, tickers: list[str]) -> pd.DataFrame | None:   
+def download_tickers_history(start_date: datetime, end_date: datetime, tickers: list[str]) -> pd.DataFrame:   
     """
         Downloads the selected ticker price history data from Yahoo Finance engine.
         
@@ -26,6 +26,6 @@ def download_tickers_history(start_date: datetime, end_date: datetime, tickers: 
         auto_adjust=True,
         progress=False,
         threads=True,
-    );
+    )
 
-    return tckrs_history
+    return tckrs_history if tckrs_history is not None else pd.DataFrame()

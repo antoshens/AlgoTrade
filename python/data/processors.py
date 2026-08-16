@@ -1,16 +1,12 @@
 import numpy as np
 import pandas as pd
 
-def clean_ticker_data():
-    """Clean up ticker history data by removing missing values and formatting columns."""
-    ...
-
-def log_returns(stocks: pd.DataFrame | pd.Series | None) -> pd.DataFrame | pd.Series:
+def log_returns(stocks: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series:
     """Calculate logarithmic daily returns for stock price data.
 
     Parameters
     ----------
-    stocks : pd.DataFrame | pd.Series | None
+    stocks : pd.DataFrame | pd.Series
         Price data containing 'Close' prices or MultiIndex ticker history.
 
     Returns
@@ -40,12 +36,12 @@ def log_returns(stocks: pd.DataFrame | pd.Series | None) -> pd.DataFrame | pd.Se
     
     return log_returns
 
-def overnight_gaps_prc(stocks: pd.DataFrame | None) -> pd.DataFrame:
+def overnight_gaps_prc(stocks: pd.DataFrame) -> pd.DataFrame:
     """Calculate the overnight price gap percentage between previous close and current open prices.
 
     Parameters
     ----------
-    stocks : pd.DataFrame | None
+    stocks : pd.DataFrame
         Price data containing 'Open' and 'Close' prices.
 
     Returns
@@ -77,12 +73,12 @@ def overnight_gaps_prc(stocks: pd.DataFrame | None) -> pd.DataFrame:
     
     return overnight_gap.dropna() # type: ignore
 
-def rolling_overnight_gaps_std(stocks: pd.DataFrame | None, window: int) -> pd.DataFrame:
+def rolling_overnight_gaps_std(stocks: pd.DataFrame, window: int) -> pd.DataFrame:
     """Calculate the rolling standard deviation of overnight price gaps over a specified window.
 
     Parameters
     ----------
-    stocks : pd.DataFrame | None
+    stocks : pd.DataFrame
         Price data containing 'Open' and 'Close' prices.
     window : int
         Rolling window size in days.
@@ -96,12 +92,12 @@ def rolling_overnight_gaps_std(stocks: pd.DataFrame | None, window: int) -> pd.D
 
     return overnight_gap.rolling(window).std()
 
-def intraday_returns_prc(stocks: pd.DataFrame | None) -> pd.DataFrame:
+def intraday_returns_prc(stocks: pd.DataFrame) -> pd.DataFrame:
     """Calculate the intraday percentage log return between open and close prices.
 
     Parameters
     ----------
-    stocks : pd.DataFrame | None
+    stocks : pd.DataFrame
         Price data containing 'Open' and 'Close' prices.
 
     Returns
@@ -133,12 +129,12 @@ def intraday_returns_prc(stocks: pd.DataFrame | None) -> pd.DataFrame:
         
     return intraday_return.dropna() # type: ignore
 
-def daily_spread_pct(stocks: pd.DataFrame | None) -> pd.DataFrame:
+def daily_spread_pct(stocks: pd.DataFrame) -> pd.DataFrame:
     """Calculate the relative daily high-low price spread as a percentage of the close price.
 
     Parameters
     ----------
-    stocks : pd.DataFrame | None
+    stocks : pd.DataFrame
         Price data containing 'High', 'Low', and 'Close' prices.
 
     Returns
@@ -172,12 +168,12 @@ def daily_spread_pct(stocks: pd.DataFrame | None) -> pd.DataFrame:
         
     return intraday_spread.dropna() # type: ignore
 
-def rolling_daily_spreads_mean(stocks: pd.DataFrame | None, window: int) -> pd.DataFrame:
+def rolling_daily_spreads_mean(stocks: pd.DataFrame, window: int) -> pd.DataFrame:
     """Calculate the rolling mean of daily high-low price spreads over a specified window.
 
     Parameters
     ----------
-    stocks : pd.DataFrame | None
+    stocks : pd.DataFrame
         Price data containing 'High', 'Low', and 'Close' prices.
     window : int
         Rolling window size in days.
@@ -191,12 +187,12 @@ def rolling_daily_spreads_mean(stocks: pd.DataFrame | None, window: int) -> pd.D
         
     return intraday_spread.rolling(window).mean()
 
-def rolling_vol_daily(stocks: pd.DataFrame | pd.Series | None, window: int) -> pd.DataFrame | pd.Series:
+def rolling_vol_daily(stocks: pd.DataFrame | pd.Series, window: int) -> pd.DataFrame | pd.Series:
     """Calculate rolling daily volatility (standard deviation of log returns) over a specified window.
 
     Parameters
     ----------
-    stocks : pd.DataFrame | pd.Series | None
+    stocks : pd.DataFrame | pd.Series
         Price data containing stock prices.
     window : int
         Rolling window size in days.
