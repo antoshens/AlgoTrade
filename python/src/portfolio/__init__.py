@@ -1,7 +1,8 @@
 from .markowitz import *
 
 __all__ = [
-    "gmf_return_optimization",
+    "optimize_portfolio",
     "find_max_sharpe",
+    "find_max_sortino",
     "get_risk_free_rate",
 ]
