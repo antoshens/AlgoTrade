@@ -32,7 +32,6 @@ Options:
 OptimizationModel = Literal[
     'CLASSIC',
     'LEDOIT_WOLF',
-    'SORTINO',
     'BLACK_LITTERMAN',
     'GARCH',
     'DCC_GARCH',
@@ -43,7 +42,6 @@ Covariance estimation or portfolio optimization model to use.
 Options:
 - 'CLASSIC': Sample covariance matrix scaled by trading days.
 - 'LEDOIT_WOLF': Ledoit-Wolf shrinkage covariance estimator.
-- 'SORTINO': Downside deviation (semi-variance) based optimization.
 - 'BLACK_LITTERMAN': Black-Litterman model with market views.
 - 'GARCH': Univariate GARCH volatility modeling.
 - 'DCC_GARCH': Dynamic Conditional Correlation GARCH model.
@@ -179,7 +177,7 @@ def optimize_portfolio(
     """
     # Calculate optimization params
     num_assets = tickers_df.columns.levels[0].nunique() # type: ignore
-    log_ret = log_returns(tickers_df)
+    log_ret = np.array(log_returns(tickers_df))
     yr_cov = np.array(num_assets) # assets coveriance matrix
     init_weights = np.ones(num_assets) / num_assets
     expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
@@ -202,12 +200,17 @@ def optimize_portfolio(
                 yr_cov = np.array(log_ret.cov() * TRADING_DAYS_PER_YEAR)  # type: ignore
             case 'LEDOIT_WOLF':
                 lw = LedoitWolf()
-                lw.fit(log_ret.to_xarray())
+                lw.fit(log_ret)
                 yr_cov = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
             case _: raise ValueError(f'Unrecognized opt_model param value: {model}.')
 
     # Optimization
-    optimum_results = _run_portfolio_optimization(yr_cov, init_weights, expected_returns, risk_free_rate)
+    optimum_results = _run_portfolio_optimization(
+        yr_cov,
+        init_weights,
+        expected_returns,
+        log_ret,
+        risk_free_rate)
 
     return pd.DataFrame(optimum_results)
 
@@ -215,6 +218,7 @@ def _run_portfolio_optimization(
     yr_cov: np.ndarray,
     init_weights: np.ndarray,
     expected_returns: np.ndarray,
+    log_returns: np.ndarray,
     risk_free_rate: float,
 ) -> list:
     """Internal helper that performs the SLSQP portfolio optimization loop."""
@@ -262,11 +266,17 @@ def _run_portfolio_optimization(
             vol = np.sqrt(last_optimal_weights.T @ yr_cov @ last_optimal_weights)
             sharpe = (ret - risk_free_rate) / vol
 
+            daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
+            square_negative_deviations = np.minimum(0, last_optimal_weights @ log_returns.T - daily_rf) ** 2
+            downside_vol = np.sqrt(np.mean(square_negative_deviations)) * np.sqrt(TRADING_DAYS_PER_YEAR)
+            sortino = (ret - risk_free_rate) / downside_vol
+
             optimum_results.append({
                 'weights': last_optimal_weights,
                 'return': ret,
                 'vol': vol,
                 'sharpe': sharpe,
+                'sortino': sortino,
             })
 
     return optimum_results
