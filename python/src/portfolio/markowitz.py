@@ -1,13 +1,13 @@
+from data.constants import TRADING_DAYS_PER_YEAR
 from datetime import datetime
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Any
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 from data.processors import log_returns
 from sklearn.covariance import LedoitWolf
-
-TRADING_DAYS_PER_YEAR = 252
+from .black_litterman import black_litterman
 
 RiskFreeRateBase = Literal['T_BILLS', 'TREASURY_NOTES', 'SOFR']
 """
@@ -29,23 +29,26 @@ Options:
 - None: Defaults to 'BACKTEST' behavior.
 """
 
-OptimizationModel = Literal[
-    'CLASSIC',
-    'LEDOIT_WOLF',
-    'BLACK_LITTERMAN',
-    'GARCH',
-    'DCC_GARCH',
-]
+CovarianceModel = Literal['CLASSIC', 'LEDOIT_WOLF', 'GARCH', 'DCC_GARCH']
 """
-Covariance estimation or portfolio optimization model to use.
+Covariance estimation model to use.
 
 Options:
 - 'CLASSIC': Sample covariance matrix scaled by trading days.
 - 'LEDOIT_WOLF': Ledoit-Wolf shrinkage covariance estimator.
-- 'BLACK_LITTERMAN': Black-Litterman model with market views.
 - 'GARCH': Univariate GARCH volatility modeling.
 - 'DCC_GARCH': Dynamic Conditional Correlation GARCH model.
 """
+
+ReturnsModel = Literal['HISTORICAL', 'BLACK_LITTERMAN']
+"""
+Expected returns estimation model to use.
+
+Options:
+- 'HISTORICAL': Mean historical returns scaled by trading days.
+- 'BLACK_LITTERMAN': Black-Litterman model incorporating market capitalization and investor views.
+"""
+
 
 @dataclass
 class SharpeRatio:
@@ -149,38 +152,51 @@ def get_risk_free_rate(
 def optimize_portfolio(
     tickers_df: pd.DataFrame,
     rf_base: RiskFreeRateBase,
-    opt_models: list[OptimizationModel] = ['CLASSIC'],
-    opt_type: OptimizationType = None
+    cov_model: CovarianceModel = 'CLASSIC',
+    returns_model: ReturnsModel = 'HISTORICAL',
+    opt_type: OptimizationType = None,
+    views: np.ndarray | None = None,
+    views_transition: np.ndarray | None = None,
 ) -> pd.DataFrame:
     """
-    Calculates the efficient frontier by minimizing volatility for various target returns.
+    Calculates the efficient frontier by minimizing volatility across a spectrum of target returns.
 
     Parameters
     ----------
     tickers_df : pd.DataFrame
-        Historical price data for the assets, expected to contain 'Close' prices.
+        Historical price data for the assets, structured with multi-index columns per ticker.
     rf_base : RiskFreeRateBase
-        The benchmark to use for calculating the risk-free rate.
+        The benchmark asset used for calculating the risk-free rate ('T_BILLS', 'TREASURY_NOTES', or 'SOFR').
+    cov_model : CovarianceModel, optional
+        Covariance estimation model to use ('CLASSIC', 'LEDOIT_WOLF', 'GARCH', or 'DCC_GARCH'),
+        by default 'CLASSIC'.
+    returns_model : ReturnsModel, optional
+        Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
+        by default 'HISTORICAL'.
     opt_type : OptimizationType, optional
-        Determines the date range for the risk-free rate based on backtest or live mode.
+        Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'), by default None.
+    views : np.ndarray | None, optional
+        Investor view vector Q for the Black-Litterman model, by default None.
+    views_transition : np.ndarray | None, optional
+        Pick/transition matrix P linking views to assets for Black-Litterman, by default None.
 
     Returns
     -------
     pd.DataFrame
-        A DataFrame where each row represents a portfolio on the efficient frontier, 
-        containing its weights, return, volatility, and Sharpe ratio.
-        
+        DataFrame where each row represents a portfolio on the efficient frontier,
+        containing columns for 'weights', 'return', 'vol', 'sharpe', and 'sortino'.
+
     Raises
     ------
     ValueError
-        If an unrecognized opt_type parameter value is provided.
+        If an unrecognized `opt_type`, `cov_model`, or `returns_model` entry is provided.
     """
     # Calculate optimization params
     num_assets = tickers_df.columns.levels[0].nunique() # type: ignore
-    log_ret = np.array(log_returns(tickers_df))
-    yr_cov = np.array(num_assets) # assets coveriance matrix
+    log_ret_df = log_returns(tickers_df)
+    log_ret = np.array(log_ret_df)
     init_weights = np.ones(num_assets) / num_assets
-    expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
+    expected_returns = np.array(log_ret_df.mean(axis=0) * TRADING_DAYS_PER_YEAR)
 
     # Defining optimization type
     match opt_type:
@@ -194,15 +210,29 @@ def optimize_portfolio(
 
     risk_free_rate = get_risk_free_rate(rf_base, rf_start_date, rf_end_date, opt_type)
 
-    for model in opt_models:
-        match model:
-            case 'CLASSIC':
-                yr_cov = np.array(log_ret.cov() * TRADING_DAYS_PER_YEAR)  # type: ignore
-            case 'LEDOIT_WOLF':
-                lw = LedoitWolf()
-                lw.fit(log_ret)
-                yr_cov = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
-            case _: raise ValueError(f'Unrecognized opt_model param value: {model}.')
+    # Choose covariance estimation model
+    match cov_model:
+        case 'CLASSIC':
+            yr_cov = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
+        case 'LEDOIT_WOLF':
+            lw = LedoitWolf()
+            lw.fit(log_ret)
+            yr_cov = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+        case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
+
+    # Choose returns estimation model
+    match returns_model:
+        case 'BLACK_LITTERMAN':
+            expected_returns = black_litterman(
+                expected_returns,
+                yr_cov,
+                risk_free_rate,
+                views,
+                views_transition
+            )  
+        case 'HISTORICAL':
+            pass # keep the mean historical returns
+        case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
 
     # Optimization
     optimum_results = _run_portfolio_optimization(
@@ -220,8 +250,29 @@ def _run_portfolio_optimization(
     expected_returns: np.ndarray,
     log_returns: np.ndarray,
     risk_free_rate: float,
-) -> list:
-    """Internal helper that performs the SLSQP portfolio optimization loop."""
+) -> list[dict[str, Any]]:
+    """
+    Internal helper that performs the SLSQP portfolio optimization loop across target returns.
+
+    Parameters
+    ----------
+    yr_cov : np.ndarray
+        Annualized covariance matrix of asset returns.
+    init_weights : np.ndarray
+        Initial weight allocation array (e.g. equal weights).
+    expected_returns : np.ndarray
+        Expected annualized asset returns.
+    log_returns : np.ndarray
+        Daily log returns matrix of the assets.
+    risk_free_rate : float
+        Annualized risk-free rate.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        List of optimization result dictionaries containing 'weights', 'return', 'vol',
+        'sharpe', and 'sortino' for each convergence point.
+    """
     num_assets = yr_cov.__len__()
     constraints = [
         {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
@@ -284,8 +335,11 @@ def _run_portfolio_optimization(
 def find_max_sharpe(
     tickers_df: pd.DataFrame,
     rf_base: RiskFreeRateBase,
-    opt_models: list[OptimizationModel] = ['CLASSIC'],
-    opt_type: OptimizationType = None
+    cov_model: CovarianceModel = 'CLASSIC',
+    returns_model: ReturnsModel = 'HISTORICAL',
+    opt_type: OptimizationType = None,
+    views: np.ndarray | None = None,
+    views_transition: np.ndarray | None = None,
 ) -> tuple[SharpeRatio, pd.DataFrame]:
     """
     Optimizes portfolio weights to maximize the Sharpe ratio (find the tangency portfolio).
@@ -293,33 +347,44 @@ def find_max_sharpe(
     Parameters
     ----------
     tickers_df : pd.DataFrame
-        Historical price data for the assets.
+        Historical price data for the assets, structured with multi-index columns per ticker.
     rf_base : RiskFreeRateBase
-        The benchmark to use for calculating the risk-free rate.
+        The benchmark asset used for calculating the risk-free rate ('T_BILLS', 'TREASURY_NOTES', or 'SOFR').
+    cov_model : CovarianceModel, optional
+        Covariance estimation model to use ('CLASSIC', 'LEDOIT_WOLF', 'GARCH', or 'DCC_GARCH'),
+        by default 'CLASSIC'.
+    returns_model : ReturnsModel, optional
+        Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
+        by default 'HISTORICAL'.
     opt_type : OptimizationType, optional
-        Determines the date range for the risk-free rate based on backtest or live mode.
+        Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'), by default None.
+    views : np.ndarray | None, optional
+        Investor view vector Q for the Black-Litterman model, by default None.
+    views_transition : np.ndarray | None, optional
+        Pick/transition matrix P linking views to assets for Black-Litterman, by default None.
 
     Returns
     -------
     tuple[SharpeRatio, pd.DataFrame]
         A tuple containing:
-        - SharpeRatio object with tangency portfolio metrics.
+        - SharpeRatio object with tangency portfolio metrics (max_sharpe, tangency_return, tangency_vol).
         - DataFrame containing the percentage weights for each stock in the optimal portfolio.
-        
+
     Raises
     ------
     ValueError
-        If an unrecognized opt_type parameter value is provided.
+        If an unrecognized `opt_type`, `cov_model`, or `returns_model` entry is provided.
     RuntimeError
         If the scipy SLSQP optimizer fails to find a solution.
     """
     # Calculate optimization params
     num_assets = tickers_df.columns.levels[0].nunique() # type: ignore
-    log_ret = log_returns(tickers_df)
-    yr_cov = np.array(num_assets) # assets covariance matrix
+    log_ret_df = log_returns(tickers_df)
+    log_ret = np.array(log_ret_df)
     init_weights = np.ones(num_assets) / num_assets
     expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
 
+    # Choose covariance estimation model
     match opt_type:
         case 'BACKTEST' | None:
             rf_start_date = pd.to_datetime(tickers_df.index[0]).tz_localize(None).to_pydatetime()
@@ -331,15 +396,28 @@ def find_max_sharpe(
     
     risk_free_rate = get_risk_free_rate(rf_base, rf_start_date, rf_end_date, opt_type)
 
-    for model in opt_models:
-        match model:
+    # Choose returns estimation model
+    match cov_model:
             case 'CLASSIC':
-                yr_cov = np.array(log_ret.cov() * TRADING_DAYS_PER_YEAR)  # type: ignore
+                yr_cov = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
             case 'LEDOIT_WOLF':
                 lw = LedoitWolf()
-                lw.fit(np.array(log_ret.values))
+                lw.fit(log_ret)
                 yr_cov = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
-            case _: raise ValueError(f'Unrecognized opt_model param value: {model}.')
+            case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
+    
+    match returns_model:
+        case 'BLACK_LITTERMAN':
+            expected_returns = black_litterman(
+                expected_returns,
+                yr_cov,
+                risk_free_rate,
+                views,
+                views_transition
+            )  
+        case 'HISTORICAL':
+            pass # keep the mean historical returns
+        case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
 
     # Find the Sharpe Ratio optimum
     return _maximize_sharpe_ratio(tickers_df, init_weights, yr_cov, expected_returns, risk_free_rate)
@@ -360,7 +438,7 @@ def _max_sharpe_objective(
         Array of expected annualized returns for the assets.
     risk_free_rate : float
         The annualized risk-free rate.
-    yr_cov : pd.DataFrame
+    yr_cov : np.ndarray
         The annualized covariance matrix of the assets.
 
     Returns
@@ -381,7 +459,32 @@ def _maximize_sharpe_ratio(
     expected_returns: np.ndarray,
     risk_free_rate: float
 ) -> tuple[SharpeRatio, pd.DataFrame]:
-    """Internal helper that performs the SLSQP Sharpe ratio optimization."""
+    """
+    Internal helper that performs the SLSQP Sharpe ratio optimization.
+
+    Parameters
+    ----------
+    tickers_df : pd.DataFrame | pd.Series
+        Historical asset data used to extract ticker names.
+    init_weights : np.ndarray
+        Initial weight allocation array.
+    yr_cov : np.ndarray
+        Annualized covariance matrix of asset returns.
+    expected_returns : np.ndarray
+        Expected annualized returns of the assets.
+    risk_free_rate : float
+        Annualized risk-free rate.
+
+    Returns
+    -------
+    tuple[SharpeRatio, pd.DataFrame]
+        Optimal SharpeRatio metrics and DataFrame of percentage weights per asset.
+
+    Raises
+    ------
+    RuntimeError
+        If the SLSQP optimizer fails to converge.
+    """
     num_assets = yr_cov.__len__()
     constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
     bounds = tuple((0, 0.4) for _ in range(num_assets))
@@ -420,38 +523,53 @@ def _maximize_sharpe_ratio(
 
 def find_max_sortino(
     tickers_df: pd.DataFrame,
-    rf_base: RiskFreeRateBase,
-    opt_type: OptimizationType = None
+    rf_base: RiskFreeRateBase,    
+    cov_model: CovarianceModel = 'CLASSIC',
+    returns_model: ReturnsModel = 'HISTORICAL',
+    opt_type: OptimizationType = None,
+    views: np.ndarray | None = None,
+    views_transition: np.ndarray | None = None,
 ) -> tuple[SortinoRatio, pd.DataFrame]:
     """
-    Optimizes portfolio weights to maximize the Sortino ratio (find the tangency portfolio).
+    Optimizes portfolio weights to maximize the Sortino ratio (minimizing downside volatility).
 
     Parameters
     ----------
     tickers_df : pd.DataFrame
-        Historical price data for the assets.
+        Historical price data for the assets, structured with multi-index columns per ticker.
     rf_base : RiskFreeRateBase
-        The benchmark to use for calculating the risk-free rate.
+        The benchmark asset used for calculating the risk-free rate ('T_BILLS', 'TREASURY_NOTES', or 'SOFR').
+    cov_model : CovarianceModel, optional
+        Covariance estimation model to use ('CLASSIC', 'LEDOIT_WOLF', 'GARCH', or 'DCC_GARCH'),
+        by default 'CLASSIC'.
+    returns_model : ReturnsModel, optional
+        Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
+        by default 'HISTORICAL'.
     opt_type : OptimizationType, optional
-        Determines the date range for the risk-free rate based on backtest or live mode.
+        Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'), by default None.
+    views : np.ndarray | None, optional
+        Investor view vector Q for the Black-Litterman model, by default None.
+    views_transition : np.ndarray | None, optional
+        Pick/transition matrix P linking views to assets for Black-Litterman, by default None.
 
     Returns
     -------
     tuple[SortinoRatio, pd.DataFrame]
         A tuple containing:
-        - SortinoRatio object with tangency portfolio metrics.
+        - SortinoRatio object with metrics (max_sortino, tangency_return, tangency_vol).
         - DataFrame containing the percentage weights for each stock in the optimal portfolio.
-        
+
     Raises
     ------
     ValueError
-        If an unrecognized opt_type parameter value is provided.
+        If an unrecognized `opt_type`, `cov_model`, or `returns_model` entry is provided.
     RuntimeError
         If the scipy SLSQP optimizer fails to find a solution.
     """
     # Calculate optimization params
     num_assets = tickers_df.columns.levels[0].nunique() # type: ignore
-    log_ret = np.array(log_returns(tickers_df))
+    log_ret_df = log_returns(tickers_df)
+    log_ret = np.array(log_ret_df)
     init_weights = np.ones(num_assets) / num_assets
     expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
 
@@ -463,8 +581,32 @@ def find_max_sortino(
             rf_start_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
             rf_end_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
         case _: raise ValueError(f'Unrecognized opt_value param value: {opt_type}.')
-    
+   
     risk_free_rate = get_risk_free_rate(rf_base, rf_start_date, rf_end_date, opt_type)
+
+    # Choose covariance estimation model
+    match cov_model:
+        case 'CLASSIC':
+            yr_cov = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
+        case 'LEDOIT_WOLF':
+            lw = LedoitWolf()
+            lw.fit(log_ret)
+            yr_cov = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+        case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
+
+    # Choose returns estimation model
+    match returns_model:
+        case 'BLACK_LITTERMAN':
+            expected_returns = black_litterman(
+                expected_returns,
+                yr_cov,
+                risk_free_rate,
+                views,
+                views_transition
+            )  
+        case 'HISTORICAL':
+            pass # keep the mean historical returns
+        case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
 
     # Find the Sortino Ratio optimum
     return _maximize_sortino_ratio(tickers_df, init_weights, log_ret, expected_returns, risk_free_rate)
@@ -473,7 +615,8 @@ def _max_sortino_objective(
     weights: np.ndarray,
     log_returns: np.ndarray,
     expected_returns: np.ndarray,
-    risk_free_rate: float) -> float:
+    risk_free_rate: float
+) -> float:
     """
     Objective function to find the maximum Sortino ratio (returns negative Sortino ratio for minimization).
 
@@ -481,12 +624,12 @@ def _max_sortino_objective(
     ----------
     weights : np.ndarray
         Array of portfolio weights.
-    log_returns: np.ndarray
-        Array of daily logarithmic assets returns
+    log_returns : np.ndarray
+        Matrix of daily logarithmic asset returns.
     expected_returns : np.ndarray
         Array of expected annualized returns for the assets.
     risk_free_rate : float
-        The annualized risk-free rate.
+        Annualized risk-free rate.
 
     Returns
     -------
@@ -509,7 +652,32 @@ def _maximize_sortino_ratio(
     expected_returns: np.ndarray,
     risk_free_rate: float
 ) -> tuple[SortinoRatio, pd.DataFrame]:
-    """Internal helper that performs the SLSQP Sortino ratio optimization."""
+    """
+    Internal helper that performs the SLSQP Sortino ratio optimization.
+
+    Parameters
+    ----------
+    tickers_df : pd.DataFrame | pd.Series
+        Historical asset data used to extract ticker names.
+    init_weights : np.ndarray
+        Initial weight allocation array.
+    log_returns : np.ndarray
+        Matrix of daily logarithmic asset returns.
+    expected_returns : np.ndarray
+        Expected annualized returns of the assets.
+    risk_free_rate : float
+        Annualized risk-free rate.
+
+    Returns
+    -------
+    tuple[SortinoRatio, pd.DataFrame]
+        Optimal SortinoRatio metrics and DataFrame of percentage weights per asset.
+
+    Raises
+    ------
+    RuntimeError
+        If the SLSQP optimizer fails to converge.
+    """
     num_assets = tickers_df.columns.levels[0].nunique() # type: ignore
     constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
     bounds = tuple((0, 0.4) for _ in range(num_assets))
@@ -531,7 +699,7 @@ def _maximize_sortino_ratio(
 
     if res_max_sortino.success:
         optimal_weights = res_max_sortino.x
-        exact_max_ret = np.dot(optimal_weights, expected_returns)
+        exact_max_ret = (optimal_weights @ expected_returns)
 
         daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
         square_negative_deviations = np.minimum(0, optimal_weights @ log_returns.T - daily_rf) ** 2

@@ -1,5 +1,6 @@
 from .download_data import download_tickers_history
 from .processors import *
+from .constants import *
 
 __all__ = [
     "download_tickers_history",
@@ -10,4 +11,6 @@ __all__ = [
     "intraday_returns_prc",
     "daily_spread_pct",
     "rolling_daily_spreads_mean",
+
+    "TRADING_DAYS_PER_YEAR"
 ]
