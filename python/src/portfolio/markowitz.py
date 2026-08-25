@@ -157,6 +157,7 @@ def optimize_portfolio(
     opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
+    bl_tau: float = .05
 ) -> pd.DataFrame:
     """
     Calculates the efficient frontier by minimizing volatility across a spectrum of target returns.
@@ -179,6 +180,9 @@ def optimize_portfolio(
         Investor view vector Q for the Black-Litterman model, by default None.
     views_transition : np.ndarray | None, optional
         Pick/transition matrix P linking views to assets for Black-Litterman, by default None.
+    bl_tau : float, optional
+        A scalar representing the degree of uncertainty in the equilibrium vector in Black-Litterman model.
+        by default 0.05.
 
     Returns
     -------
@@ -228,8 +232,9 @@ def optimize_portfolio(
                 cov_matrix,
                 risk_free_rate,
                 views,
-                views_transition
-            )  
+                views_transition,
+                bl_tau
+            )
         case 'HISTORICAL':
             pass # keep the mean historical returns
         case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
@@ -340,6 +345,7 @@ def find_max_sharpe(
     opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
+    bl_tau: float = .05,
 ) -> tuple[SharpeRatio, pd.DataFrame]:
     """
     Optimizes portfolio weights to maximize the Sharpe ratio (find the tangency portfolio).
@@ -362,6 +368,9 @@ def find_max_sharpe(
         Investor view vector Q for the Black-Litterman model, by default None.
     views_transition : np.ndarray | None, optional
         Pick/transition matrix P linking views to assets for Black-Litterman, by default None.
+    bl_tau : float, optional
+        A scalar representing the degree of uncertainty in the equilibrium vector in Black-Litterman model.
+        by default 0.05.
 
     Returns
     -------
@@ -413,8 +422,9 @@ def find_max_sharpe(
                 cov_matrix,
                 risk_free_rate,
                 views,
-                views_transition
-            )  
+                views_transition,
+                bl_tau
+            )
         case 'HISTORICAL':
             pass # keep the mean historical returns
         case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
@@ -529,6 +539,7 @@ def find_max_sortino(
     opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
+    bl_tau: float = .05
 ) -> tuple[SortinoRatio, pd.DataFrame]:
     """
     Optimizes portfolio weights to maximize the Sortino ratio (minimizing downside volatility).
@@ -551,6 +562,9 @@ def find_max_sortino(
         Investor view vector Q for the Black-Litterman model, by default None.
     views_transition : np.ndarray | None, optional
         Pick/transition matrix P linking views to assets for Black-Litterman, by default None.
+    bl_tau : float, optional
+        A scalar representing the degree of uncertainty in the equilibrium vector in Black-Litterman model.
+        by default 0.05.
 
     Returns
     -------
@@ -602,8 +616,9 @@ def find_max_sortino(
                 cov_matrix,
                 risk_free_rate,
                 views,
-                views_transition
-            )  
+                views_transition,
+                bl_tau
+            )
         case 'HISTORICAL':
             pass # keep the mean historical returns
         case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
