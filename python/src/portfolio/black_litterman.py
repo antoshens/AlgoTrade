@@ -1,5 +1,3 @@
-from dataclasses import dataclass
-from typing import Literal
 import numpy as np
 
 def black_litterman(
@@ -8,7 +6,7 @@ def black_litterman(
     risk_free_rate: float,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Calculates the posterior expected returns vector using the Black-Litterman model.
 
@@ -58,10 +56,12 @@ def black_litterman(
         inv_omega = np.array([[0]])
 
     # Posterior vector of returns
-    
     inv_tau_cov = np.linalg.inv(tau * cov_matrix)
     posterior_know = np.array(np.linalg.inv(inv_tau_cov + views_transition.T @ inv_omega @ views_transition))
     prior_know = np.array(inv_tau_cov @ pi + views_transition.T @ inv_omega @ views)
-    black_litterman_vector = (posterior_know @ prior_know)
+    bl_expected_returns = (posterior_know @ prior_know)
 
-    return black_litterman_vector.flatten()
+    # Adjusted covariance matrix
+    bl_cov_matrix = cov_matrix + posterior_know
+
+    return (bl_expected_returns.flatten(), bl_cov_matrix)

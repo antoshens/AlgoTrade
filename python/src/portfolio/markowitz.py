@@ -19,7 +19,7 @@ Options:
 - 'SOFR': Secured Overnight Financing Rate (SR3=F).
 """
 
-OptimizationType = Literal['BACKTEST', 'LIVE', None]
+OptimizationType = Literal['BACKTEST', 'LIVE']
 """
 Determines the date range for fetching the risk-free rate.
 
@@ -90,7 +90,7 @@ def get_risk_free_rate(
     base: RiskFreeRateBase,
     start_date: datetime,
     end_date: datetime,
-    opt_type: OptimizationType = None
+    opt_type: OptimizationType | None = None
 ) -> float:
     """
     Fetches and calculates the annualized risk-free rate for a given period and benchmark from FRED.
@@ -154,7 +154,7 @@ def optimize_portfolio(
     rf_base: RiskFreeRateBase,
     cov_model: CovarianceModel = 'CLASSIC',
     returns_model: ReturnsModel = 'HISTORICAL',
-    opt_type: OptimizationType = None,
+    opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
 ) -> pd.DataFrame:
@@ -213,19 +213,19 @@ def optimize_portfolio(
     # Choose covariance estimation model
     match cov_model:
         case 'CLASSIC':
-            yr_cov = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
+            cov_matrix = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
         case 'LEDOIT_WOLF':
             lw = LedoitWolf()
             lw.fit(log_ret)
-            yr_cov = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+            cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
         case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
 
     # Choose returns estimation model
     match returns_model:
         case 'BLACK_LITTERMAN':
-            expected_returns = black_litterman(
+            (expected_returns, cov_matrix) = black_litterman(
                 expected_returns,
-                yr_cov,
+                cov_matrix,
                 risk_free_rate,
                 views,
                 views_transition
@@ -236,7 +236,7 @@ def optimize_portfolio(
 
     # Optimization
     optimum_results = _run_portfolio_optimization(
-        yr_cov,
+        cov_matrix,
         init_weights,
         expected_returns,
         log_ret,
@@ -245,7 +245,7 @@ def optimize_portfolio(
     return pd.DataFrame(optimum_results)
 
 def _run_portfolio_optimization(
-    yr_cov: np.ndarray,
+    cov_matrix: np.ndarray,
     init_weights: np.ndarray,
     expected_returns: np.ndarray,
     log_returns: np.ndarray,
@@ -256,7 +256,7 @@ def _run_portfolio_optimization(
 
     Parameters
     ----------
-    yr_cov : np.ndarray
+    cov_matrix : np.ndarray
         Annualized covariance matrix of asset returns.
     init_weights : np.ndarray
         Initial weight allocation array (e.g. equal weights).
@@ -273,7 +273,7 @@ def _run_portfolio_optimization(
         List of optimization result dictionaries containing 'weights', 'return', 'vol',
         'sharpe', and 'sortino' for each convergence point.
     """
-    num_assets = yr_cov.__len__()
+    num_assets = cov_matrix.__len__()
     constraints = [
         {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
     ]
@@ -282,7 +282,7 @@ def _run_portfolio_optimization(
     bounds = tuple((0, 0.4) for _ in range(num_assets))
 
     no_target_opt = minimize(
-        fun=lambda weights: 0.5 * (weights.T @ yr_cov @ weights),
+        fun=lambda weights: 0.5 * (weights.T @ cov_matrix @ weights),
         x0=init_weights,
         method='SLSQP',
         constraints=constraints,
@@ -304,7 +304,7 @@ def _run_portfolio_optimization(
         ]
 
         res = minimize(
-                fun=lambda weights: 0.5 * (weights.T @ yr_cov @ weights),
+                fun=lambda weights: 0.5 * (weights.T @ cov_matrix @ weights),
                 x0=last_optimal_weights,
                 method='SLSQP',
                 constraints=constraints,
@@ -314,7 +314,7 @@ def _run_portfolio_optimization(
         if res.success:
             last_optimal_weights = res.x
             ret = np.dot(last_optimal_weights, expected_returns)
-            vol = np.sqrt(last_optimal_weights.T @ yr_cov @ last_optimal_weights)
+            vol = np.sqrt(last_optimal_weights.T @ cov_matrix @ last_optimal_weights)
             sharpe = (ret - risk_free_rate) / vol
 
             daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
@@ -337,7 +337,7 @@ def find_max_sharpe(
     rf_base: RiskFreeRateBase,
     cov_model: CovarianceModel = 'CLASSIC',
     returns_model: ReturnsModel = 'HISTORICAL',
-    opt_type: OptimizationType = None,
+    opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
 ) -> tuple[SharpeRatio, pd.DataFrame]:
@@ -399,18 +399,18 @@ def find_max_sharpe(
     # Choose returns estimation model
     match cov_model:
             case 'CLASSIC':
-                yr_cov = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
+                cov_matrix = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
             case 'LEDOIT_WOLF':
                 lw = LedoitWolf()
                 lw.fit(log_ret)
-                yr_cov = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+                cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
             case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
     
     match returns_model:
         case 'BLACK_LITTERMAN':
-            expected_returns = black_litterman(
+            (expected_returns, cov_matrix) = black_litterman(
                 expected_returns,
-                yr_cov,
+                cov_matrix,
                 risk_free_rate,
                 views,
                 views_transition
@@ -420,13 +420,13 @@ def find_max_sharpe(
         case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
 
     # Find the Sharpe Ratio optimum
-    return _maximize_sharpe_ratio(tickers_df, init_weights, yr_cov, expected_returns, risk_free_rate)
+    return _maximize_sharpe_ratio(tickers_df, init_weights, cov_matrix, expected_returns, risk_free_rate)
 
 def _max_sharpe_objective(
         weights: np.ndarray,
         expected_returns: np.ndarray,
         risk_free_rate: float,
-        yr_cov: np.ndarray) -> float:
+        cov_matrix: np.ndarray) -> float:
     """
     Objective function to find the maximum Sharpe ratio (returns negative Sharpe ratio for minimization).
 
@@ -438,7 +438,7 @@ def _max_sharpe_objective(
         Array of expected annualized returns for the assets.
     risk_free_rate : float
         The annualized risk-free rate.
-    yr_cov : np.ndarray
+    cov_matrix : np.ndarray
         The annualized covariance matrix of the assets.
 
     Returns
@@ -447,7 +447,7 @@ def _max_sharpe_objective(
         The negative Sharpe ratio of the portfolio.
     """
     ret = np.dot(weights, expected_returns)
-    vol = np.sqrt(weights.T @ yr_cov @ weights)
+    vol = np.sqrt(weights.T @ cov_matrix @ weights)
 
     # negative Sharpe ratio so minimize() finds the maximum
     return -(ret - risk_free_rate) / vol
@@ -455,7 +455,7 @@ def _max_sharpe_objective(
 def _maximize_sharpe_ratio(
     tickers_df: pd.DataFrame | pd.Series,
     init_weights: np.ndarray,
-    yr_cov: np.ndarray,
+    cov_matrix: np.ndarray,
     expected_returns: np.ndarray,
     risk_free_rate: float
 ) -> tuple[SharpeRatio, pd.DataFrame]:
@@ -468,7 +468,7 @@ def _maximize_sharpe_ratio(
         Historical asset data used to extract ticker names.
     init_weights : np.ndarray
         Initial weight allocation array.
-    yr_cov : np.ndarray
+    cov_matrix : np.ndarray
         Annualized covariance matrix of asset returns.
     expected_returns : np.ndarray
         Expected annualized returns of the assets.
@@ -485,7 +485,7 @@ def _maximize_sharpe_ratio(
     RuntimeError
         If the SLSQP optimizer fails to converge.
     """
-    num_assets = yr_cov.__len__()
+    num_assets = cov_matrix.__len__()
     constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
     bounds = tuple((0, 0.4) for _ in range(num_assets))
 
@@ -494,7 +494,7 @@ def _maximize_sharpe_ratio(
             w,
             expected_returns=expected_returns,
             risk_free_rate=risk_free_rate,
-            yr_cov=yr_cov),
+            cov_matrix=cov_matrix),
         x0=init_weights,
         method='SLSQP',
         bounds=bounds,
@@ -504,7 +504,7 @@ def _maximize_sharpe_ratio(
     if res_max_sharpe.success:
         optimal_weights = res_max_sharpe.x
         exact_max_ret = np.dot(optimal_weights, expected_returns)
-        exact_max_vol = np.sqrt(optimal_weights.T @ yr_cov @ optimal_weights)
+        exact_max_vol = np.sqrt(optimal_weights.T @ cov_matrix @ optimal_weights)
         exact_max_sharpe = (exact_max_ret - risk_free_rate) / exact_max_vol
 
         max_sharpe_stocks_weights = pd.DataFrame()
@@ -526,7 +526,7 @@ def find_max_sortino(
     rf_base: RiskFreeRateBase,    
     cov_model: CovarianceModel = 'CLASSIC',
     returns_model: ReturnsModel = 'HISTORICAL',
-    opt_type: OptimizationType = None,
+    opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
 ) -> tuple[SortinoRatio, pd.DataFrame]:
@@ -587,19 +587,19 @@ def find_max_sortino(
     # Choose covariance estimation model
     match cov_model:
         case 'CLASSIC':
-            yr_cov = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
+            cov_matrix = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
         case 'LEDOIT_WOLF':
             lw = LedoitWolf()
             lw.fit(log_ret)
-            yr_cov = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+            cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
         case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
 
     # Choose returns estimation model
     match returns_model:
         case 'BLACK_LITTERMAN':
-            expected_returns = black_litterman(
+            (expected_returns, _) = black_litterman(
                 expected_returns,
-                yr_cov,
+                cov_matrix,
                 risk_free_rate,
                 views,
                 views_transition
