@@ -8,6 +8,7 @@ from scipy.optimize import minimize
 from data.processors import log_returns
 from sklearn.covariance import LedoitWolf
 from .black_litterman import black_litterman
+from .garch import garch
 
 RiskFreeRateBase = Literal['T_BILLS', 'TREASURY_NOTES', 'SOFR']
 """
@@ -26,10 +27,9 @@ Determines the date range for fetching the risk-free rate.
 Options:
 - 'BACKTEST': Uses the start and end dates of the provided historical dataset.
 - 'LIVE': Uses only the most recent date available in the dataset.
-- None: Defaults to 'BACKTEST' behavior.
 """
 
-CovarianceModel = Literal['CLASSIC', 'LEDOIT_WOLF', 'GARCH', 'DCC_GARCH']
+CovarianceModel = Literal['CLASSIC', 'LEDOIT_WOLF', 'GARCH', 'EGARCH']
 """
 Covariance estimation model to use.
 
@@ -37,7 +37,7 @@ Options:
 - 'CLASSIC': Sample covariance matrix scaled by trading days.
 - 'LEDOIT_WOLF': Ledoit-Wolf shrinkage covariance estimator.
 - 'GARCH': Univariate GARCH volatility modeling.
-- 'DCC_GARCH': Dynamic Conditional Correlation GARCH model.
+- 'EGARCH': An Exponential GARCH modeling.
 """
 
 ReturnsModel = Literal['HISTORICAL', 'BLACK_LITTERMAN']
@@ -157,7 +157,8 @@ def optimize_portfolio(
     opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
-    bl_tau: float = .05
+    bl_tau: float = .05,
+    prediction_period: int = 1
 ) -> pd.DataFrame:
     """
     Calculates the efficient frontier by minimizing volatility across a spectrum of target returns.
@@ -169,7 +170,7 @@ def optimize_portfolio(
     rf_base : RiskFreeRateBase
         The benchmark asset used for calculating the risk-free rate ('T_BILLS', 'TREASURY_NOTES', or 'SOFR').
     cov_model : CovarianceModel, optional
-        Covariance estimation model to use ('CLASSIC', 'LEDOIT_WOLF', 'GARCH', or 'DCC_GARCH'),
+        Covariance estimation model to use ('CLASSIC', 'LEDOIT_WOLF', 'GARCH', or 'EGARCH'),
         by default 'CLASSIC'.
     returns_model : ReturnsModel, optional
         Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
@@ -181,8 +182,11 @@ def optimize_portfolio(
     views_transition : np.ndarray | None, optional
         Pick/transition matrix P linking views to assets for Black-Litterman, by default None.
     bl_tau : float, optional
-        A scalar representing the degree of uncertainty in the equilibrium vector in Black-Litterman model.
+        A scalar representing the degree of uncertainty in the prior equilibrium vector in Black-Litterman,
         by default 0.05.
+    prediction_period : int, optional
+        Forecast horizon in trading days for (E)GARCH volatility modeling,
+        by default 1.
 
     Returns
     -------
@@ -222,6 +226,19 @@ def optimize_portfolio(
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+        case 'GARCH' | 'EGARCH':
+            lw = LedoitWolf()
+            lw.fit(log_ret)
+            cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+            (garch_ret, garch_vol) = garch(
+                log_ret,
+                prediction_period,
+                arch_type=cov_model
+            )
+            expected_returns = garch_ret
+            garch_vol_diag = np.diag(garch_vol)
+            cov_matrix = garch_vol_diag @ cov_matrix @ garch_vol_diag
+
         case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
 
     # Choose returns estimation model
@@ -236,7 +253,7 @@ def optimize_portfolio(
                 bl_tau
             )
         case 'HISTORICAL':
-            pass # keep the mean historical returns
+            pass # keep the mean historical or GARCH returns
         case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
 
     # Optimization
@@ -346,6 +363,7 @@ def find_max_sharpe(
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
     bl_tau: float = .05,
+    prediction_period: int = 1,
 ) -> tuple[SharpeRatio, pd.DataFrame]:
     """
     Optimizes portfolio weights to maximize the Sharpe ratio (find the tangency portfolio).
@@ -357,7 +375,7 @@ def find_max_sharpe(
     rf_base : RiskFreeRateBase
         The benchmark asset used for calculating the risk-free rate ('T_BILLS', 'TREASURY_NOTES', or 'SOFR').
     cov_model : CovarianceModel, optional
-        Covariance estimation model to use ('CLASSIC', 'LEDOIT_WOLF', 'GARCH', or 'DCC_GARCH'),
+        Covariance estimation model to use ('CLASSIC', 'LEDOIT_WOLF', 'GARCH', or 'EGARCH'),
         by default 'CLASSIC'.
     returns_model : ReturnsModel, optional
         Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
@@ -369,8 +387,11 @@ def find_max_sharpe(
     views_transition : np.ndarray | None, optional
         Pick/transition matrix P linking views to assets for Black-Litterman, by default None.
     bl_tau : float, optional
-        A scalar representing the degree of uncertainty in the equilibrium vector in Black-Litterman model.
+        A scalar representing the degree of uncertainty in the prior equilibrium vector in Black-Litterman,
         by default 0.05.
+    prediction_period : int, optional
+        Forecast horizon in trading days for (E)GARCH volatility modeling,
+        by default 1.
 
     Returns
     -------
@@ -407,13 +428,25 @@ def find_max_sharpe(
 
     # Choose returns estimation model
     match cov_model:
-            case 'CLASSIC':
-                cov_matrix = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
-            case 'LEDOIT_WOLF':
+        case 'CLASSIC':
+            cov_matrix = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
+        case 'LEDOIT_WOLF':
+            lw = LedoitWolf()
+            lw.fit(log_ret)
+            cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+        case 'GARCH' | 'EGARCH':
                 lw = LedoitWolf()
                 lw.fit(log_ret)
                 cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
-            case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
+                (garch_ret, garch_vol) = garch(
+                    log_ret,
+                    prediction_period,
+                    arch_type=cov_model
+                )
+                expected_returns = garch_ret
+                garch_vol_diag = np.diag(garch_vol)
+                cov_matrix = garch_vol_diag @ cov_matrix @ garch_vol_diag
+        case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
     
     match returns_model:
         case 'BLACK_LITTERMAN':
@@ -426,7 +459,7 @@ def find_max_sharpe(
                 bl_tau
             )
         case 'HISTORICAL':
-            pass # keep the mean historical returns
+            pass # keep the mean historical or GARCH returns
         case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
 
     # Find the Sharpe Ratio optimum
@@ -539,7 +572,8 @@ def find_max_sortino(
     opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
-    bl_tau: float = .05
+    bl_tau: float = .05,
+    prediction_period: int = 1,
 ) -> tuple[SortinoRatio, pd.DataFrame]:
     """
     Optimizes portfolio weights to maximize the Sortino ratio (minimizing downside volatility).
@@ -551,7 +585,7 @@ def find_max_sortino(
     rf_base : RiskFreeRateBase
         The benchmark asset used for calculating the risk-free rate ('T_BILLS', 'TREASURY_NOTES', or 'SOFR').
     cov_model : CovarianceModel, optional
-        Covariance estimation model to use ('CLASSIC', 'LEDOIT_WOLF', 'GARCH', or 'DCC_GARCH'),
+        Covariance estimation model to use ('CLASSIC', 'LEDOIT_WOLF', 'GARCH', or 'EGARCH'),
         by default 'CLASSIC'.
     returns_model : ReturnsModel, optional
         Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
@@ -563,8 +597,11 @@ def find_max_sortino(
     views_transition : np.ndarray | None, optional
         Pick/transition matrix P linking views to assets for Black-Litterman, by default None.
     bl_tau : float, optional
-        A scalar representing the degree of uncertainty in the equilibrium vector in Black-Litterman model.
+        A scalar representing the degree of uncertainty in the prior equilibrium vector in Black-Litterman,
         by default 0.05.
+    prediction_period : int, optional
+        Forecast horizon in trading days for (E)GARCH volatility modeling,
+        by default 1.
 
     Returns
     -------
@@ -606,6 +643,18 @@ def find_max_sortino(
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+        case 'GARCH' | 'EGARCH':
+            lw = LedoitWolf()
+            lw.fit(log_ret)
+            cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+            (garch_ret, garch_vol) = garch(
+                log_ret,
+                prediction_period,
+                arch_type=cov_model
+            )
+            expected_returns = garch_ret
+            garch_vol_diag = np.diag(garch_vol)
+            cov_matrix = garch_vol_diag @ cov_matrix @ garch_vol_diag
         case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
 
     # Choose returns estimation model
@@ -620,7 +669,7 @@ def find_max_sortino(
                 bl_tau
             )
         case 'HISTORICAL':
-            pass # keep the mean historical returns
+            pass # keep the mean historical or GARCH returns
         case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
 
     # Find the Sortino Ratio optimum
