@@ -1,16 +1,18 @@
-from data.constants import TRADING_DAYS_PER_YEAR
-from datetime import datetime
 from dataclasses import dataclass
-from typing import Literal, Any
+from datetime import datetime
+from typing import Any, Literal
+
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
+from data.constants import TRADING_DAYS_PER_YEAR
 from data.processors import log_returns
+from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
+
 from .black_litterman import black_litterman
 from .garch import garch
 
-RiskFreeRateBase = Literal['T_BILLS', 'TREASURY_NOTES', 'SOFR']
+RiskFreeRateBase = Literal["T_BILLS", "TREASURY_NOTES", "SOFR"]
 """
 The benchmark asset used to calculate the risk-free rate.
 
@@ -20,7 +22,7 @@ Options:
 - 'SOFR': Secured Overnight Financing Rate (SR3=F).
 """
 
-OptimizationType = Literal['BACKTEST', 'LIVE']
+OptimizationType = Literal["BACKTEST", "LIVE"]
 """
 Determines the date range for fetching the risk-free rate.
 
@@ -29,7 +31,7 @@ Options:
 - 'LIVE': Uses only the most recent date available in the dataset.
 """
 
-CovarianceModel = Literal['CLASSIC', 'LEDOIT_WOLF', 'GARCH', 'EGARCH']
+CovarianceModel = Literal["CLASSIC", "LEDOIT_WOLF", "GARCH", "EGARCH"]
 """
 Covariance estimation model to use.
 
@@ -40,7 +42,7 @@ Options:
 - 'EGARCH': An Exponential GARCH modeling.
 """
 
-ReturnsModel = Literal['HISTORICAL', 'BLACK_LITTERMAN']
+ReturnsModel = Literal["HISTORICAL", "BLACK_LITTERMAN"]
 """
 Expected returns estimation model to use.
 
@@ -64,9 +66,11 @@ class SharpeRatio:
     tangency_vol : float
         The expected annualized total volatility (standard deviation) of the tangency portfolio.
     """
+
     max_sharpe: float
     tangency_return: float
     tangency_vol: float
+
 
 @dataclass
 class SortinoRatio:
@@ -82,15 +86,17 @@ class SortinoRatio:
     tangency_vol : float
         The expected annualized downside volatility (semi-deviation below daily risk-free rate).
     """
+
     max_sortino: float
     tangency_return: float
     tangency_vol: float
+
 
 def get_risk_free_rate(
     base: RiskFreeRateBase,
     start_date: datetime,
     end_date: datetime,
-    opt_type: OptimizationType | None = None
+    opt_type: OptimizationType | None = None,
 ) -> float:
     """
     Fetches and calculates the annualized risk-free rate for a given period and benchmark from FRED.
@@ -115,7 +121,7 @@ def get_risk_free_rate(
     -------
     float
         The annualized risk-free rate expressed as a decimal (e.g., 0.045 for 4.5%).
-    
+
     Raises
     ------
     ValueError
@@ -123,17 +129,22 @@ def get_risk_free_rate(
     """
     ticker: str
     match base:
-        case 'T_BILLS':
-            ticker = 'DGS3MO'
-        case 'TREASURY_NOTES':
-            ticker = 'DGS10'
-        case 'SOFR':
-            ticker = 'SOFR'
-        case _: raise ValueError(f'Unknown literal for base {base}')
+        case "T_BILLS":
+            ticker = "DGS3MO"
+        case "TREASURY_NOTES":
+            ticker = "DGS10"
+        case "SOFR":
+            ticker = "SOFR"
+        case _:
+            raise ValueError(f"Unknown literal for base {base}")
 
     # Download the FRED data from the open source
-    url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={ticker}'
-    risk_ticker_df = pd.read_csv(url, index_col=0, parse_dates=True, na_values='.').loc[start_date:end_date].dropna()
+    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={ticker}"
+    risk_ticker_df = (
+        pd.read_csv(url, index_col=0, parse_dates=True, na_values=".")
+        .loc[start_date:end_date]
+        .dropna()
+    )
     if risk_ticker_df.empty:
         raise ValueError(
             f"No data returned from FRED for ticker '{ticker}' between {start_date.date()} and {end_date.date()}."
@@ -141,24 +152,26 @@ def get_risk_free_rate(
 
     risk_free_rate = 0.0
     match opt_type:
-        case 'BACKTEST' | None:
+        case "BACKTEST" | None:
             risk_free_rate = float(risk_ticker_df.mean().iloc[0])
-        case 'LIVE':
-            risk_free_rate = float(risk_ticker_df.iloc[-1, 0]) # type: ignore
-        case _: raise ValueError(f'Unknown literal for opt_type {opt_type}')
+        case "LIVE":
+            risk_free_rate = float(risk_ticker_df.iloc[-1, 0])  # type: ignore
+        case _:
+            raise ValueError(f"Unknown literal for opt_type {opt_type}")
 
     return risk_free_rate / 100
+
 
 def optimize_portfolio(
     tickers_df: pd.DataFrame,
     rf_base: RiskFreeRateBase,
-    cov_model: CovarianceModel = 'CLASSIC',
-    returns_model: ReturnsModel = 'HISTORICAL',
+    cov_model: CovarianceModel = "CLASSIC",
+    returns_model: ReturnsModel = "HISTORICAL",
     opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
-    bl_tau: float = .05,
-    prediction_period: int = 1
+    bl_tau: float = 0.05,
+    prediction_period: int = 1,
 ) -> pd.DataFrame:
     """
     Calculates the efficient frontier by minimizing volatility across a spectrum of target returns.
@@ -200,7 +213,7 @@ def optimize_portfolio(
         If an unrecognized `opt_type`, `cov_model`, or `returns_model` entry is provided.
     """
     # Calculate optimization params
-    num_assets = tickers_df.columns.levels[0].nunique() # type: ignore
+    num_assets = tickers_df.columns.levels[0].nunique()  # type: ignore
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
     init_weights = np.ones(num_assets) / num_assets
@@ -208,63 +221,74 @@ def optimize_portfolio(
 
     # Defining optimization type
     match opt_type:
-        case 'BACKTEST' | None:
-            rf_start_date = pd.to_datetime(tickers_df.index[0]).tz_localize(None).to_pydatetime()
-            rf_end_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
-        case 'LIVE':
-            rf_start_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
-            rf_end_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
-        case _: raise ValueError(f'Unrecognized opt_value param value: {opt_type}.')
+        case "BACKTEST" | None:
+            rf_start_date = (
+                pd.to_datetime(tickers_df.index[0]).tz_localize(None).to_pydatetime()
+            )
+            rf_end_date = (
+                pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
+            )
+        case "LIVE":
+            rf_start_date = (
+                pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
+            )
+            rf_end_date = (
+                pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
+            )
+        case _:
+            raise ValueError(f"Unrecognized opt_value param value: {opt_type}.")
 
     risk_free_rate = get_risk_free_rate(rf_base, rf_start_date, rf_end_date, opt_type)
 
     # Choose covariance estimation model
     match cov_model:
-        case 'CLASSIC':
-            cov_matrix = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
-        case 'LEDOIT_WOLF':
+        case "CLASSIC":
+            cov_matrix = np.array(
+                log_ret_df.cov() * TRADING_DAYS_PER_YEAR
+            )  # assets covariance matrix # type: ignore
+        case "LEDOIT_WOLF":
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
-        case 'GARCH' | 'EGARCH':
+        case "GARCH" | "EGARCH":
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
             (garch_ret, garch_vol) = garch(
-                log_ret,
-                prediction_period,
-                arch_type=cov_model
+                log_ret, prediction_period, arch_type=cov_model
             )
             expected_returns = garch_ret
             garch_vol_diag = np.diag(garch_vol)
             cov_matrix = garch_vol_diag @ cov_matrix @ garch_vol_diag
 
-        case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
+        case _:
+            raise ValueError(f"Unrecognized cov_model param value: {cov_model}.")
 
     # Choose returns estimation model
     match returns_model:
-        case 'BLACK_LITTERMAN':
+        case "BLACK_LITTERMAN":
             (expected_returns, cov_matrix) = black_litterman(
                 expected_returns,
                 cov_matrix,
                 risk_free_rate,
                 views,
                 views_transition,
-                bl_tau
+                bl_tau,
             )
-        case 'HISTORICAL':
-            pass # keep the mean historical or GARCH returns
-        case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
+        case "HISTORICAL":
+            pass  # keep the mean historical or GARCH returns
+        case _:
+            raise ValueError(
+                f"Unrecognized returns_model param value: {returns_model}."
+            )
 
     # Optimization
     optimum_results = _run_portfolio_optimization(
-        cov_matrix,
-        init_weights,
-        expected_returns,
-        log_ret,
-        risk_free_rate)
+        cov_matrix, init_weights, expected_returns, log_ret, risk_free_rate
+    )
 
     return pd.DataFrame(optimum_results)
+
 
 def _run_portfolio_optimization(
     cov_matrix: np.ndarray,
@@ -295,9 +319,9 @@ def _run_portfolio_optimization(
         List of optimization result dictionaries containing 'weights', 'return', 'vol',
         'sharpe', and 'sortino' for each convergence point.
     """
-    num_assets = cov_matrix.__len__()
+    num_assets = len(cov_matrix)
     constraints = [
-        {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
+        {"type": "eq", "fun": lambda w: np.sum(w) - 1},
     ]
 
     # Bounds: Long-only (0 <= w_i <= 1)
@@ -306,10 +330,10 @@ def _run_portfolio_optimization(
     no_target_opt = minimize(
         fun=lambda weights: 0.5 * (weights.T @ cov_matrix @ weights),
         x0=init_weights,
-        method='SLSQP',
+        method="SLSQP",
         constraints=constraints,
-        bounds=bounds
-    )    
+        bounds=bounds,
+    )
 
     # Constraints over the possible target_returns
     min_target = np.dot(no_target_opt.x, expected_returns)
@@ -319,19 +343,24 @@ def _run_portfolio_optimization(
     # Optimize with the target_return constraints
     optimum_results = []
     last_optimal_weights = init_weights
-    for target_return in target_returns:    
+    for target_return in target_returns:
         constraints = [
-            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
-            {'type': 'eq', 'fun': lambda w: np.dot(w, expected_returns) - target_return},
+            {"type": "eq", "fun": lambda w: np.sum(w) - 1},
+            {
+                "type": "eq",
+                "fun": lambda w, target_return=target_return: (
+                    np.dot(w, expected_returns) - target_return
+                ),
+            },
         ]
 
         res = minimize(
-                fun=lambda weights: 0.5 * (weights.T @ cov_matrix @ weights),
-                x0=last_optimal_weights,
-                method='SLSQP',
-                constraints=constraints,
-                bounds=bounds
-            )
+            fun=lambda weights: 0.5 * (weights.T @ cov_matrix @ weights),
+            x0=last_optimal_weights,
+            method="SLSQP",
+            constraints=constraints,
+            bounds=bounds,
+        )
 
         if res.success:
             last_optimal_weights = res.x
@@ -340,29 +369,36 @@ def _run_portfolio_optimization(
             sharpe = (ret - risk_free_rate) / vol
 
             daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
-            square_negative_deviations = np.minimum(0, last_optimal_weights @ log_returns.T - daily_rf) ** 2
-            downside_vol = np.sqrt(np.mean(square_negative_deviations)) * np.sqrt(TRADING_DAYS_PER_YEAR)
+            square_negative_deviations = (
+                np.minimum(0, last_optimal_weights @ log_returns.T - daily_rf) ** 2
+            )
+            downside_vol = np.sqrt(np.mean(square_negative_deviations)) * np.sqrt(
+                TRADING_DAYS_PER_YEAR
+            )
             sortino = (ret - risk_free_rate) / downside_vol
 
-            optimum_results.append({
-                'weights': last_optimal_weights,
-                'return': ret,
-                'vol': vol,
-                'sharpe': sharpe,
-                'sortino': sortino,
-            })
+            optimum_results.append(
+                {
+                    "weights": last_optimal_weights,
+                    "return": ret,
+                    "vol": vol,
+                    "sharpe": sharpe,
+                    "sortino": sortino,
+                }
+            )
 
     return optimum_results
+
 
 def find_max_sharpe(
     tickers_df: pd.DataFrame,
     rf_base: RiskFreeRateBase,
-    cov_model: CovarianceModel = 'CLASSIC',
-    returns_model: ReturnsModel = 'HISTORICAL',
+    cov_model: CovarianceModel = "CLASSIC",
+    returns_model: ReturnsModel = "HISTORICAL",
     opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
-    bl_tau: float = .05,
+    bl_tau: float = 0.05,
     prediction_period: int = 1,
 ) -> tuple[SharpeRatio, pd.DataFrame]:
     """
@@ -408,7 +444,7 @@ def find_max_sharpe(
         If the scipy SLSQP optimizer fails to find a solution.
     """
     # Calculate optimization params
-    num_assets = tickers_df.columns.levels[0].nunique() # type: ignore
+    num_assets = tickers_df.columns.levels[0].nunique()  # type: ignore
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
     init_weights = np.ones(num_assets) / num_assets
@@ -416,60 +452,77 @@ def find_max_sharpe(
 
     # Choose covariance estimation model
     match opt_type:
-        case 'BACKTEST' | None:
-            rf_start_date = pd.to_datetime(tickers_df.index[0]).tz_localize(None).to_pydatetime()
-            rf_end_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
-        case 'LIVE':
-            rf_start_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
-            rf_end_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
-        case _: raise ValueError(f'Unrecognized opt_value param value: {opt_type}.')
-    
+        case "BACKTEST" | None:
+            rf_start_date = (
+                pd.to_datetime(tickers_df.index[0]).tz_localize(None).to_pydatetime()
+            )
+            rf_end_date = (
+                pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
+            )
+        case "LIVE":
+            rf_start_date = (
+                pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
+            )
+            rf_end_date = (
+                pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
+            )
+        case _:
+            raise ValueError(f"Unrecognized opt_value param value: {opt_type}.")
+
     risk_free_rate = get_risk_free_rate(rf_base, rf_start_date, rf_end_date, opt_type)
 
     # Choose returns estimation model
     match cov_model:
-        case 'CLASSIC':
-            cov_matrix = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
-        case 'LEDOIT_WOLF':
+        case "CLASSIC":
+            cov_matrix = np.array(
+                log_ret_df.cov() * TRADING_DAYS_PER_YEAR
+            )  # assets covariance matrix # type: ignore
+        case "LEDOIT_WOLF":
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
-        case 'GARCH' | 'EGARCH':
-                lw = LedoitWolf()
-                lw.fit(log_ret)
-                cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
-                (garch_ret, garch_vol) = garch(
-                    log_ret,
-                    prediction_period,
-                    arch_type=cov_model
-                )
-                expected_returns = garch_ret
-                garch_vol_diag = np.diag(garch_vol)
-                cov_matrix = garch_vol_diag @ cov_matrix @ garch_vol_diag
-        case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
-    
+        case "GARCH" | "EGARCH":
+            lw = LedoitWolf()
+            lw.fit(log_ret)
+            cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+            (garch_ret, garch_vol) = garch(
+                log_ret, prediction_period, arch_type=cov_model
+            )
+            expected_returns = garch_ret
+            garch_vol_diag = np.diag(garch_vol)
+            cov_matrix = garch_vol_diag @ cov_matrix @ garch_vol_diag
+        case _:
+            raise ValueError(f"Unrecognized cov_model param value: {cov_model}.")
+
     match returns_model:
-        case 'BLACK_LITTERMAN':
+        case "BLACK_LITTERMAN":
             (expected_returns, cov_matrix) = black_litterman(
                 expected_returns,
                 cov_matrix,
                 risk_free_rate,
                 views,
                 views_transition,
-                bl_tau
+                bl_tau,
             )
-        case 'HISTORICAL':
-            pass # keep the mean historical or GARCH returns
-        case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
+        case "HISTORICAL":
+            pass  # keep the mean historical or GARCH returns
+        case _:
+            raise ValueError(
+                f"Unrecognized returns_model param value: {returns_model}."
+            )
 
     # Find the Sharpe Ratio optimum
-    return _maximize_sharpe_ratio(tickers_df, init_weights, cov_matrix, expected_returns, risk_free_rate)
+    return _maximize_sharpe_ratio(
+        tickers_df, init_weights, cov_matrix, expected_returns, risk_free_rate
+    )
+
 
 def _max_sharpe_objective(
-        weights: np.ndarray,
-        expected_returns: np.ndarray,
-        risk_free_rate: float,
-        cov_matrix: np.ndarray) -> float:
+    weights: np.ndarray,
+    expected_returns: np.ndarray,
+    risk_free_rate: float,
+    cov_matrix: np.ndarray,
+) -> float:
     """
     Objective function to find the maximum Sharpe ratio (returns negative Sharpe ratio for minimization).
 
@@ -495,19 +548,20 @@ def _max_sharpe_objective(
     # negative Sharpe ratio so minimize() finds the maximum
     return -(ret - risk_free_rate) / vol
 
+
 def _maximize_sharpe_ratio(
-    tickers_df: pd.DataFrame | pd.Series,
+    tickers_df: pd.DataFrame,
     init_weights: np.ndarray,
     cov_matrix: np.ndarray,
     expected_returns: np.ndarray,
-    risk_free_rate: float
+    risk_free_rate: float,
 ) -> tuple[SharpeRatio, pd.DataFrame]:
     """
     Internal helper that performs the SLSQP Sharpe ratio optimization.
 
     Parameters
     ----------
-    tickers_df : pd.DataFrame | pd.Series
+    tickers_df : pd.DataFrame
         Historical asset data used to extract ticker names.
     init_weights : np.ndarray
         Initial weight allocation array.
@@ -528,8 +582,8 @@ def _maximize_sharpe_ratio(
     RuntimeError
         If the SLSQP optimizer fails to converge.
     """
-    num_assets = cov_matrix.__len__()
-    constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
+    num_assets = len(cov_matrix)
+    constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
     bounds = tuple((0, 0.4) for _ in range(num_assets))
 
     res_max_sharpe = minimize(
@@ -537,11 +591,12 @@ def _maximize_sharpe_ratio(
             w,
             expected_returns=expected_returns,
             risk_free_rate=risk_free_rate,
-            cov_matrix=cov_matrix),
+            cov_matrix=cov_matrix,
+        ),
         x0=init_weights,
-        method='SLSQP',
+        method="SLSQP",
         bounds=bounds,
-        constraints=constraints
+        constraints=constraints,
     )
 
     if res_max_sharpe.success:
@@ -560,19 +615,23 @@ def _maximize_sharpe_ratio(
             tangency_return=exact_max_ret,
             tangency_vol=exact_max_vol,
         )
-    else: raise RuntimeError('The optimizator finished work with an error or was aborted.')
+    else:
+        raise RuntimeError(
+            "The optimizator finished work with an error or was aborted."
+        )
 
     return (max_sharpe, max_sharpe_stocks_weights)
 
+
 def find_max_sortino(
     tickers_df: pd.DataFrame,
-    rf_base: RiskFreeRateBase,    
-    cov_model: CovarianceModel = 'CLASSIC',
-    returns_model: ReturnsModel = 'HISTORICAL',
+    rf_base: RiskFreeRateBase,
+    cov_model: CovarianceModel = "CLASSIC",
+    returns_model: ReturnsModel = "HISTORICAL",
     opt_type: OptimizationType | None = None,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
-    bl_tau: float = .05,
+    bl_tau: float = 0.05,
     prediction_period: int = 1,
 ) -> tuple[SortinoRatio, pd.DataFrame]:
     """
@@ -618,68 +677,84 @@ def find_max_sortino(
         If the scipy SLSQP optimizer fails to find a solution.
     """
     # Calculate optimization params
-    num_assets = tickers_df.columns.levels[0].nunique() # type: ignore
+    num_assets = tickers_df.columns.levels[0].nunique()  # type: ignore
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
     init_weights = np.ones(num_assets) / num_assets
     expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
 
     match opt_type:
-        case 'BACKTEST' | None:
-            rf_start_date = pd.to_datetime(tickers_df.index[0]).tz_localize(None).to_pydatetime()
-            rf_end_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
-        case 'LIVE':
-            rf_start_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
-            rf_end_date = pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
-        case _: raise ValueError(f'Unrecognized opt_value param value: {opt_type}.')
-   
+        case "BACKTEST" | None:
+            rf_start_date = (
+                pd.to_datetime(tickers_df.index[0]).tz_localize(None).to_pydatetime()
+            )
+            rf_end_date = (
+                pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
+            )
+        case "LIVE":
+            rf_start_date = (
+                pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
+            )
+            rf_end_date = (
+                pd.to_datetime(tickers_df.index[-1]).tz_localize(None).to_pydatetime()
+            )
+        case _:
+            raise ValueError(f"Unrecognized opt_value param value: {opt_type}.")
+
     risk_free_rate = get_risk_free_rate(rf_base, rf_start_date, rf_end_date, opt_type)
 
     # Choose covariance estimation model
     match cov_model:
-        case 'CLASSIC':
-            cov_matrix = np.array(log_ret_df.cov() * TRADING_DAYS_PER_YEAR) # assets covariance matrix # type: ignore
-        case 'LEDOIT_WOLF':
+        case "CLASSIC":
+            cov_matrix = np.array(
+                log_ret_df.cov() * TRADING_DAYS_PER_YEAR
+            )  # assets covariance matrix # type: ignore
+        case "LEDOIT_WOLF":
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
-        case 'GARCH' | 'EGARCH':
+        case "GARCH" | "EGARCH":
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
             (garch_ret, garch_vol) = garch(
-                log_ret,
-                prediction_period,
-                arch_type=cov_model
+                log_ret, prediction_period, arch_type=cov_model
             )
             expected_returns = garch_ret
             garch_vol_diag = np.diag(garch_vol)
             cov_matrix = garch_vol_diag @ cov_matrix @ garch_vol_diag
-        case _: raise ValueError(f'Unrecognized cov_model param value: {cov_model}.')
+        case _:
+            raise ValueError(f"Unrecognized cov_model param value: {cov_model}.")
 
     # Choose returns estimation model
     match returns_model:
-        case 'BLACK_LITTERMAN':
+        case "BLACK_LITTERMAN":
             (expected_returns, _) = black_litterman(
                 expected_returns,
                 cov_matrix,
                 risk_free_rate,
                 views,
                 views_transition,
-                bl_tau
+                bl_tau,
             )
-        case 'HISTORICAL':
-            pass # keep the mean historical or GARCH returns
-        case _: raise ValueError(f'Unrecognized returns_model param value: {returns_model}.')
+        case "HISTORICAL":
+            pass  # keep the mean historical or GARCH returns
+        case _:
+            raise ValueError(
+                f"Unrecognized returns_model param value: {returns_model}."
+            )
 
     # Find the Sortino Ratio optimum
-    return _maximize_sortino_ratio(tickers_df, init_weights, log_ret, expected_returns, risk_free_rate)
+    return _maximize_sortino_ratio(
+        tickers_df, init_weights, log_ret, expected_returns, risk_free_rate
+    )
+
 
 def _max_sortino_objective(
     weights: np.ndarray,
     log_returns: np.ndarray,
     expected_returns: np.ndarray,
-    risk_free_rate: float
+    risk_free_rate: float,
 ) -> float:
     """
     Objective function to find the maximum Sortino ratio (returns negative Sortino ratio for minimization).
@@ -704,24 +779,27 @@ def _max_sortino_objective(
 
     daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
     square_negative_deviations = np.minimum(0, weights @ log_returns.T - daily_rf) ** 2
-    downside_vol = np.sqrt((square_negative_deviations).mean(axis=0)) * np.sqrt(TRADING_DAYS_PER_YEAR)
+    downside_vol = np.sqrt((square_negative_deviations).mean(axis=0)) * np.sqrt(
+        TRADING_DAYS_PER_YEAR
+    )
 
     # negative Sortino ratio so minimize() finds the maximum
     return -(ret - risk_free_rate) / downside_vol
 
+
 def _maximize_sortino_ratio(
-    tickers_df: pd.DataFrame | pd.Series,
+    tickers_df: pd.DataFrame,
     init_weights: np.ndarray,
     log_returns: np.ndarray,
     expected_returns: np.ndarray,
-    risk_free_rate: float
+    risk_free_rate: float,
 ) -> tuple[SortinoRatio, pd.DataFrame]:
     """
     Internal helper that performs the SLSQP Sortino ratio optimization.
 
     Parameters
     ----------
-    tickers_df : pd.DataFrame | pd.Series
+    tickers_df : pd.DataFrame
         Historical asset data used to extract ticker names.
     init_weights : np.ndarray
         Initial weight allocation array.
@@ -742,8 +820,8 @@ def _maximize_sortino_ratio(
     RuntimeError
         If the SLSQP optimizer fails to converge.
     """
-    num_assets = tickers_df.columns.levels[0].nunique() # type: ignore
-    constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
+    num_assets = len(init_weights)
+    constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
     bounds = tuple((0, 0.4) for _ in range(num_assets))
 
     daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
@@ -754,21 +832,26 @@ def _maximize_sortino_ratio(
             w,
             log_returns,
             expected_returns=expected_returns,
-            risk_free_rate=risk_free_rate),
+            risk_free_rate=risk_free_rate,
+        ),
         x0=init_weights,
-        method='SLSQP',
+        method="SLSQP",
         bounds=bounds,
-        constraints=constraints
+        constraints=constraints,
     )
 
     if res_max_sortino.success:
         optimal_weights = res_max_sortino.x
-        exact_max_ret = (optimal_weights @ expected_returns)
+        exact_max_ret = optimal_weights @ expected_returns
 
         daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
-        square_negative_deviations = np.minimum(0, optimal_weights @ log_returns.T - daily_rf) ** 2
-        exact_max_negative_vol = np.sqrt((square_negative_deviations).mean(axis=0)) * np.sqrt(TRADING_DAYS_PER_YEAR)
-        
+        square_negative_deviations = (
+            np.minimum(0, optimal_weights @ log_returns.T - daily_rf) ** 2
+        )
+        exact_max_negative_vol = np.sqrt(
+            (square_negative_deviations).mean(axis=0)
+        ) * np.sqrt(TRADING_DAYS_PER_YEAR)
+
         exact_max_sortino = (exact_max_ret - risk_free_rate) / exact_max_negative_vol
 
         max_sortino_stocks_weights = pd.DataFrame()
@@ -781,6 +864,9 @@ def _maximize_sortino_ratio(
             tangency_return=exact_max_ret,
             tangency_vol=exact_max_negative_vol,
         )
-    else: raise RuntimeError('The optimizator finished work with an error or was aborted.')
+    else:
+        raise RuntimeError(
+            "The optimizator finished work with an error or was aborted."
+        )
 
     return (max_sortino, max_sortino_stocks_weights)

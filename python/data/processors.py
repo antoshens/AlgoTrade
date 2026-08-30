@@ -1,5 +1,16 @@
+from typing import overload
+
 import numpy as np
 import pandas as pd
+
+
+@overload
+def log_returns(stocks: pd.DataFrame) -> pd.DataFrame: ...
+
+
+@overload
+def log_returns(stocks: pd.Series) -> pd.Series: ...
+
 
 def log_returns(stocks: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series:
     """Calculate logarithmic daily returns for stock price data.
@@ -21,20 +32,21 @@ def log_returns(stocks: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series:
     """
     if stocks is None:
         raise ValueError("The stocks input DataFrame is None.")
-    
-    if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
-        level_name = 'Price' if 'Price' in stocks.columns.names else 1
-        close_prices = stocks.xs('Close', axis=1, level=level_name)
 
-    elif isinstance(stocks, pd.DataFrame) and 'Close' in stocks.columns:
-        close_prices = stocks['Close']
+    if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
+        level_name = "Price" if "Price" in stocks.columns.names else 1
+        close_prices = stocks.xs("Close", axis=1, level=level_name)
+
+    elif isinstance(stocks, pd.DataFrame) and "Close" in stocks.columns:
+        close_prices = stocks["Close"]
 
     else:
         close_prices = stocks
 
-    log_returns = np.log(close_prices).diff().dropna() # type: ignore
-    
+    log_returns = np.log(close_prices).diff().dropna()  # type: ignore
+
     return log_returns
+
 
 def overnight_gaps_prc(stocks: pd.DataFrame) -> pd.DataFrame:
     """Calculate the overnight price gap percentage between previous close and current open prices.
@@ -56,22 +68,27 @@ def overnight_gaps_prc(stocks: pd.DataFrame) -> pd.DataFrame:
     """
     if stocks is None:
         raise ValueError("The stocks input DataFrame is None.")
-    
-    if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
-        level_name = 'Price' if 'Price' in stocks.columns.names else 1
-        open_prices = stocks.xs('Open', axis=1, level=level_name)
-        close_prices = stocks.xs('Close', axis=1, level=level_name)
 
-    elif isinstance(stocks, pd.DataFrame) and {'Open', 'Close'}.issubset(stocks.columns):
-        close_prices = stocks['Close']
-        open_prices = stocks['Open']
+    if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
+        level_name = "Price" if "Price" in stocks.columns.names else 1
+        open_prices = stocks.xs("Open", axis=1, level=level_name)
+        close_prices = stocks.xs("Close", axis=1, level=level_name)
+
+    elif isinstance(stocks, pd.DataFrame) and {"Open", "Close"}.issubset(
+        stocks.columns
+    ):
+        close_prices = stocks["Close"]
+        open_prices = stocks["Open"]
 
     else:
-        raise ValueError("The stocks input must be a DataFrame containing both 'Open' and 'Close' prices.")
+        raise ValueError(
+            "The stocks input must be a DataFrame containing both 'Open' and 'Close' prices."
+        )
 
-    overnight_gap = np.log(open_prices / close_prices.shift(1)) * 100 
-    
-    return overnight_gap.dropna() # type: ignore
+    overnight_gap = np.log(open_prices / close_prices.shift(1)) * 100
+
+    return overnight_gap.dropna()  # type: ignore
+
 
 def rolling_overnight_gaps_std(stocks: pd.DataFrame, window: int) -> pd.DataFrame:
     """Calculate the rolling standard deviation of overnight price gaps over a specified window.
@@ -91,6 +108,7 @@ def rolling_overnight_gaps_std(stocks: pd.DataFrame, window: int) -> pd.DataFram
     overnight_gap = overnight_gaps_prc(stocks)
 
     return overnight_gap.rolling(window).std()
+
 
 def intraday_returns_prc(stocks: pd.DataFrame) -> pd.DataFrame:
     """Calculate the intraday percentage log return between open and close prices.
@@ -112,22 +130,27 @@ def intraday_returns_prc(stocks: pd.DataFrame) -> pd.DataFrame:
     """
     if stocks is None:
         raise ValueError("The stocks input DataFrame is None.")
-        
-    if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
-        level_name = 'Price' if 'Price' in stocks.columns.names else 1
-        open_prices = stocks.xs('Open', axis=1, level=level_name)
-        close_prices = stocks.xs('Close', axis=1, level=level_name)
 
-    elif isinstance(stocks, pd.DataFrame) and {'Open', 'Close'}.issubset(stocks.columns):
-        close_prices = stocks['Close']
-        open_prices = stocks['Open']
+    if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
+        level_name = "Price" if "Price" in stocks.columns.names else 1
+        open_prices = stocks.xs("Open", axis=1, level=level_name)
+        close_prices = stocks.xs("Close", axis=1, level=level_name)
+
+    elif isinstance(stocks, pd.DataFrame) and {"Open", "Close"}.issubset(
+        stocks.columns
+    ):
+        close_prices = stocks["Close"]
+        open_prices = stocks["Open"]
 
     else:
-        raise ValueError("The stocks input must be a DataFrame containing both 'Open' and 'Close' prices.")
-    
+        raise ValueError(
+            "The stocks input must be a DataFrame containing both 'Open' and 'Close' prices."
+        )
+
     intraday_return = np.log(close_prices / open_prices) * 100
-        
-    return intraday_return.dropna() # type: ignore
+
+    return intraday_return.dropna()  # type: ignore
+
 
 def daily_spread_pct(stocks: pd.DataFrame) -> pd.DataFrame:
     """Calculate the relative daily high-low price spread as a percentage of the close price.
@@ -149,24 +172,29 @@ def daily_spread_pct(stocks: pd.DataFrame) -> pd.DataFrame:
     """
     if stocks is None:
         raise ValueError("The stocks input DataFrame is None.")
-        
-    if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
-        level_name = 'Price' if 'Price' in stocks.columns.names else 1
-        close_prices = stocks.xs('Close', axis=1, level=level_name)
-        low_prices = stocks.xs('Low', axis=1, level=level_name)
-        high_prices = stocks.xs('High', axis=1, level=level_name)
 
-    elif isinstance(stocks, pd.DataFrame) and {'Low', 'High', 'Close'}.issubset(stocks.columns):
-        close_prices = stocks['Close']
-        low_prices = stocks['Low']
-        high_prices = stocks['High']
+    if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
+        level_name = "Price" if "Price" in stocks.columns.names else 1
+        close_prices = stocks.xs("Close", axis=1, level=level_name)
+        low_prices = stocks.xs("Low", axis=1, level=level_name)
+        high_prices = stocks.xs("High", axis=1, level=level_name)
+
+    elif isinstance(stocks, pd.DataFrame) and {"Low", "High", "Close"}.issubset(
+        stocks.columns
+    ):
+        close_prices = stocks["Close"]
+        low_prices = stocks["Low"]
+        high_prices = stocks["High"]
 
     else:
-        raise ValueError("The stocks input must be a DataFrame containing 'Low', 'High' and 'Close' prices.")
-    
+        raise ValueError(
+            "The stocks input must be a DataFrame containing 'Low', 'High' and 'Close' prices."
+        )
+
     intraday_spread = ((high_prices - low_prices) / close_prices) * 100
-        
-    return intraday_spread.dropna() # type: ignore
+
+    return intraday_spread.dropna()  # type: ignore
+
 
 def rolling_daily_spreads_mean(stocks: pd.DataFrame, window: int) -> pd.DataFrame:
     """Calculate the rolling mean of daily high-low price spreads over a specified window.
@@ -184,10 +212,21 @@ def rolling_daily_spreads_mean(stocks: pd.DataFrame, window: int) -> pd.DataFram
         Rolling mean of high-low price spreads.
     """
     intraday_spread = daily_spread_pct(stocks).dropna()
-        
+
     return intraday_spread.rolling(window).mean()
 
-def rolling_vol_daily(stocks: pd.DataFrame | pd.Series, window: int) -> pd.DataFrame | pd.Series:
+
+@overload
+def rolling_vol_daily(stocks: pd.DataFrame, window: int) -> pd.DataFrame: ...
+
+
+@overload
+def rolling_vol_daily(stocks: pd.Series, window: int) -> pd.Series: ...
+
+
+def rolling_vol_daily(
+    stocks: pd.DataFrame | pd.Series, window: int
+) -> pd.DataFrame | pd.Series:
     """Calculate rolling daily volatility (standard deviation of log returns) over a specified window.
 
     Parameters

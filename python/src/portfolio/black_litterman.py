@@ -1,12 +1,13 @@
 import numpy as np
 
+
 def black_litterman(
     expected_returns: np.ndarray,
     cov_matrix: np.ndarray,
     risk_free_rate: float,
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
-    tau: float = .05
+    tau: float = 0.05,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Calculates the posterior expected returns vector using the Black-Litterman model.
@@ -46,7 +47,7 @@ def black_litterman(
     # Risk_aversion matrix
     ret = weights @ expected_returns
     var = weights.T @ cov_matrix @ weights
-    '''TODO: make this configurable (if the config for Lambda exists then take the constant value), for robustness'''
+    """TODO: make this configurable (if the config for Lambda exists then take the constant value), for robustness"""
     risk_aversion = (ret - risk_free_rate) / var
 
     # Prior distribution
@@ -54,7 +55,9 @@ def black_litterman(
 
     # Investor's views
     if views is not None and views_transition is not None:
-        omega = np.diag(np.diag(views_transition @ (tau * cov_matrix) @ views_transition.T)) # matrix of views uncertainty
+        omega = np.diag(
+            np.diag(views_transition @ (tau * cov_matrix) @ views_transition.T)
+        )  # matrix of views uncertainty
         inv_omega = np.linalg.inv(omega)
     else:
         views = np.array([[0]])
@@ -63,9 +66,11 @@ def black_litterman(
 
     # Posterior vector of returns
     inv_tau_cov = np.linalg.inv(tau * cov_matrix)
-    posterior_know = np.array(np.linalg.inv(inv_tau_cov + views_transition.T @ inv_omega @ views_transition))
+    posterior_know = np.array(
+        np.linalg.inv(inv_tau_cov + views_transition.T @ inv_omega @ views_transition)
+    )
     prior_know = np.array(inv_tau_cov @ pi + views_transition.T @ inv_omega @ views)
-    bl_expected_returns = (posterior_know @ prior_know)
+    bl_expected_returns = posterior_know @ prior_know
 
     # Adjusted covariance matrix
     bl_cov_matrix = cov_matrix + posterior_know

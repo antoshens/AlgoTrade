@@ -1,19 +1,22 @@
-from dataclasses import dataclass
 from datetime import datetime
+
 import pandas as pd
 import yfinance as yf
 
-def download_tickers_history(start_date: datetime, end_date: datetime, tickers: list[str]) -> pd.DataFrame:   
+
+def download_tickers_history(
+    start_date: datetime, end_date: datetime, tickers: list[str]
+) -> pd.DataFrame:
     """
-        Downloads the selected ticker price history data from Yahoo Finance engine.
-        
-        Returns
-        -------
-        Open : Price at market open
-        High : Highest price during the trading session
-        Low : Lowest price during the trading session
-        Close : Price at market close
-        Volume : Number of shares traded
+    Downloads the selected ticker price history data from Yahoo Finance engine.
+
+    Returns
+    -------
+    Open : Price at market open
+    High : Highest price during the trading session
+    Low : Lowest price during the trading session
+    Close : Price at market close
+    Volume : Number of shares traded
     """
 
     # download market data for a list of tickers
