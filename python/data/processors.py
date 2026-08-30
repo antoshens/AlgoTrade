@@ -1,18 +1,12 @@
-from typing import overload
+from typing import TypeVar
 
 import numpy as np
 import pandas as pd
 
-
-@overload
-def log_returns(stocks: pd.DataFrame) -> pd.DataFrame: ...
+PandasData = TypeVar("PandasData", pd.DataFrame, pd.Series)
 
 
-@overload
-def log_returns(stocks: pd.Series) -> pd.Series: ...
-
-
-def log_returns(stocks: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series:
+def log_returns(stocks: PandasData) -> PandasData:
     """Calculate logarithmic daily returns for stock price data.
 
     Parameters
@@ -216,17 +210,7 @@ def rolling_daily_spreads_mean(stocks: pd.DataFrame, window: int) -> pd.DataFram
     return intraday_spread.rolling(window).mean()
 
 
-@overload
-def rolling_vol_daily(stocks: pd.DataFrame, window: int) -> pd.DataFrame: ...
-
-
-@overload
-def rolling_vol_daily(stocks: pd.Series, window: int) -> pd.Series: ...
-
-
-def rolling_vol_daily(
-    stocks: pd.DataFrame | pd.Series, window: int
-) -> pd.DataFrame | pd.Series:
+def rolling_vol_daily(stocks: PandasData, window: int) -> PandasData:
     """Calculate rolling daily volatility (standard deviation of log returns) over a specified window.
 
     Parameters
