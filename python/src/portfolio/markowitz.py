@@ -1,3 +1,16 @@
+"""
+Markowitz Portfolio Optimization Module.
+
+Provides classical mean-variance optimization (efficient frontier), maximum Sharpe ratio
+(tangency portfolio), and maximum Sortino ratio (downside risk) optimization routines.
+Supports:
+- Covariance models: Sample covariance ('CLASSIC'), Ledoit-Wolf shrinkage ('LEDOIT_WOLF'),
+  and univariate (E)GARCH volatility modeling ('GARCH', 'EGARCH').
+- Return models: Historical mean log returns ('HISTORICAL') and Black-Litterman model ('BLACK_LITTERMAN').
+- Risk-free rate fetching from FRED ('T_BILLS', 'TREASURY_NOTES', 'SOFR').
+- L1 rebalancing turnover penalties to control portfolio drift and transaction costs.
+"""
+
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
@@ -96,7 +109,7 @@ def get_risk_free_rate(
     base: RiskFreeRateBase,
     start_date: datetime,
     end_date: datetime,
-    opt_type: OptimizationType | None = None,
+    opt_type: OptimizationType = "BACKTEST",
 ) -> float:
     """
     Fetches and calculates the annualized risk-free rate for a given period and benchmark from FRED.
@@ -152,7 +165,7 @@ def get_risk_free_rate(
 
     risk_free_rate = 0.0
     match opt_type:
-        case "BACKTEST" | None:
+        case "BACKTEST":
             risk_free_rate = float(risk_ticker_df.mean().iloc[0])
         case "LIVE":
             risk_free_rate = float(risk_ticker_df.iloc[-1, 0])  # type: ignore
@@ -167,11 +180,12 @@ def optimize_portfolio(
     rf_base: RiskFreeRateBase,
     cov_model: CovarianceModel = "CLASSIC",
     returns_model: ReturnsModel = "HISTORICAL",
-    opt_type: OptimizationType | None = None,
+    opt_type: OptimizationType = "BACKTEST",
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
     bl_tau: float = 0.05,
     prediction_period: int = 1,
+    l1_coeff: float = 0.0,
 ) -> pd.DataFrame:
     """
     Calculates the efficient frontier by minimizing volatility across a spectrum of target returns.
@@ -189,7 +203,8 @@ def optimize_portfolio(
         Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
         by default 'HISTORICAL'.
     opt_type : OptimizationType, optional
-        Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'), by default None.
+        Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'),
+        by default 'BACKTEST'.
     views : np.ndarray | None, optional
         Investor view vector Q for the Black-Litterman model, by default None.
     views_transition : np.ndarray | None, optional
@@ -200,6 +215,9 @@ def optimize_portfolio(
     prediction_period : int, optional
         Forecast horizon in trading days for (E)GARCH volatility modeling,
         by default 1.
+    l1_coeff : float, optional
+        L1 penalty coefficient applied to portfolio turnover (sum of absolute weight differences)
+        to penalize excessive rebalancing, by default 0.0.
 
     Returns
     -------
@@ -213,15 +231,13 @@ def optimize_portfolio(
         If an unrecognized `opt_type`, `cov_model`, or `returns_model` entry is provided.
     """
     # Calculate optimization params
-    num_assets = tickers_df.columns.levels[0].nunique()  # type: ignore
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
-    init_weights = np.ones(num_assets) / num_assets
     expected_returns = np.array(log_ret_df.mean(axis=0) * TRADING_DAYS_PER_YEAR)
 
     # Defining optimization type
     match opt_type:
-        case "BACKTEST" | None:
+        case "BACKTEST":
             rf_start_date = (
                 pd.to_datetime(tickers_df.index[0]).tz_localize(None).to_pydatetime()
             )
@@ -284,7 +300,11 @@ def optimize_portfolio(
 
     # Optimization
     optimum_results = _run_portfolio_optimization(
-        cov_matrix, init_weights, expected_returns, log_ret, risk_free_rate
+        cov_matrix,
+        l1_coeff,
+        expected_returns,
+        log_ret,
+        risk_free_rate,
     )
 
     return pd.DataFrame(optimum_results)
@@ -292,7 +312,7 @@ def optimize_portfolio(
 
 def _run_portfolio_optimization(
     cov_matrix: np.ndarray,
-    init_weights: np.ndarray,
+    l1_coeff: float,
     expected_returns: np.ndarray,
     log_returns: np.ndarray,
     risk_free_rate: float,
@@ -304,8 +324,8 @@ def _run_portfolio_optimization(
     ----------
     cov_matrix : np.ndarray
         Annualized covariance matrix of asset returns.
-    init_weights : np.ndarray
-        Initial weight allocation array (e.g. equal weights).
+    l1_coeff : float
+        L1 penalty coefficient applied to portfolio turnover (||w - w_last||_1).
     expected_returns : np.ndarray
         Expected annualized asset returns.
     log_returns : np.ndarray
@@ -320,12 +340,13 @@ def _run_portfolio_optimization(
         'sharpe', and 'sortino' for each convergence point.
     """
     num_assets = len(cov_matrix)
+    init_weights = np.ones(num_assets) / num_assets
     constraints = [
         {"type": "eq", "fun": lambda w: np.sum(w) - 1},
     ]
 
     # Bounds: Long-only (0 <= w_i <= 1)
-    bounds = tuple((0, 0.4) for _ in range(num_assets))
+    bounds = tuple((0.05, 0.25) for _ in range(num_assets))
 
     no_target_opt = minimize(
         fun=lambda weights: 0.5 * (weights.T @ cov_matrix @ weights),
@@ -355,7 +376,12 @@ def _run_portfolio_optimization(
         ]
 
         res = minimize(
-            fun=lambda weights: 0.5 * (weights.T @ cov_matrix @ weights),
+            fun=lambda w, last_optimal_weights: _optimize_portfolio_objective(
+                w,
+                last_optimal_weights,
+                l1_coeff,
+                cov_matrix,
+            ),
             x0=last_optimal_weights,
             method="SLSQP",
             constraints=constraints,
@@ -390,16 +416,51 @@ def _run_portfolio_optimization(
     return optimum_results
 
 
+def _optimize_portfolio_objective(
+    weights: np.ndarray,
+    current_weights: np.ndarray,
+    l1_coeff: float,
+    cov_matrix: np.ndarray,
+) -> float:
+    """
+    Objective function for portfolio variance minimization with an L1 turnover penalty.
+
+    Parameters
+    ----------
+    weights : np.ndarray
+        Candidate portfolio weights vector to evaluate.
+    current_weights : np.ndarray
+        Current / baseline portfolio weights vector used to calculate rebalancing turnover.
+    l1_coeff : float
+        L1 penalty multiplier applied to turnover (sum of absolute weight differences).
+    cov_matrix : np.ndarray
+        Annualized covariance matrix of asset returns.
+
+    Returns
+    -------
+    float
+        Penalized objective value: 0.5 * (w^T @ Cov @ w) - l1_coeff * turnover.
+    """
+    turnover = np.sum(np.abs(weights - current_weights))
+    penalty = l1_coeff * turnover
+
+    markowitz_fun = 0.5 * (weights.T @ cov_matrix @ weights)
+
+    return markowitz_fun - penalty
+
+
 def find_max_sharpe(
     tickers_df: pd.DataFrame,
     rf_base: RiskFreeRateBase,
     cov_model: CovarianceModel = "CLASSIC",
     returns_model: ReturnsModel = "HISTORICAL",
-    opt_type: OptimizationType | None = None,
+    opt_type: OptimizationType = "BACKTEST",
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
     bl_tau: float = 0.05,
     prediction_period: int = 1,
+    init_weights: np.ndarray | None = None,
+    l1_coeff: float = 0.0,
 ) -> tuple[SharpeRatio, pd.DataFrame]:
     """
     Optimizes portfolio weights to maximize the Sharpe ratio (find the tangency portfolio).
@@ -417,7 +478,7 @@ def find_max_sharpe(
         Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
         by default 'HISTORICAL'.
     opt_type : OptimizationType, optional
-        Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'), by default None.
+        Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'), by default BACKTEST.
     views : np.ndarray | None, optional
         Investor view vector Q for the Black-Litterman model, by default None.
     views_transition : np.ndarray | None, optional
@@ -428,6 +489,12 @@ def find_max_sharpe(
     prediction_period : int, optional
         Forecast horizon in trading days for (E)GARCH volatility modeling,
         by default 1.
+    init_weights : np.ndarray | None, optional
+        Initial / current portfolio weights vector used as optimizer starting point and for
+        evaluating rebalancing turnover, by default None (initialized to equal weights).
+    l1_coeff : float, optional
+        L1 penalty coefficient applied to portfolio turnover (||w - w_init||_1)
+        to penalize excessive rebalancing, by default 0.0.
 
     Returns
     -------
@@ -444,15 +511,13 @@ def find_max_sharpe(
         If the scipy SLSQP optimizer fails to find a solution.
     """
     # Calculate optimization params
-    num_assets = tickers_df.columns.levels[0].nunique()  # type: ignore
+    num_assets = tickers_df.columns.get_level_values(0).nunique()
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
-    init_weights = np.ones(num_assets) / num_assets
     expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
 
-    # Choose covariance estimation model
     match opt_type:
-        case "BACKTEST" | None:
+        case "BACKTEST":
             rf_start_date = (
                 pd.to_datetime(tickers_df.index[0]).tz_localize(None).to_pydatetime()
             )
@@ -471,7 +536,7 @@ def find_max_sharpe(
 
     risk_free_rate = get_risk_free_rate(rf_base, rf_start_date, rf_end_date, opt_type)
 
-    # Choose returns estimation model
+    # Choose covariance estimation model
     match cov_model:
         case "CLASSIC":
             cov_matrix = np.array(
@@ -494,6 +559,8 @@ def find_max_sharpe(
         case _:
             raise ValueError(f"Unrecognized cov_model param value: {cov_model}.")
 
+    # Choose returns estimation model
+    init_weights = np.ones(num_assets) / num_assets
     match returns_model:
         case "BLACK_LITTERMAN":
             (expected_returns, cov_matrix) = black_litterman(
@@ -513,45 +580,19 @@ def find_max_sharpe(
 
     # Find the Sharpe Ratio optimum
     return _maximize_sharpe_ratio(
-        tickers_df, init_weights, cov_matrix, expected_returns, risk_free_rate
+        tickers_df,
+        init_weights,
+        l1_coeff,
+        cov_matrix,
+        expected_returns,
+        risk_free_rate,
     )
-
-
-def _max_sharpe_objective(
-    weights: np.ndarray,
-    expected_returns: np.ndarray,
-    risk_free_rate: float,
-    cov_matrix: np.ndarray,
-) -> float:
-    """
-    Objective function to find the maximum Sharpe ratio (returns negative Sharpe ratio for minimization).
-
-    Parameters
-    ----------
-    weights : np.ndarray
-        Array of portfolio weights.
-    expected_returns : np.ndarray
-        Array of expected annualized returns for the assets.
-    risk_free_rate : float
-        The annualized risk-free rate.
-    cov_matrix : np.ndarray
-        The annualized covariance matrix of the assets.
-
-    Returns
-    -------
-    float
-        The negative Sharpe ratio of the portfolio.
-    """
-    ret = np.dot(weights, expected_returns)
-    vol = np.sqrt(weights.T @ cov_matrix @ weights)
-
-    # negative Sharpe ratio so minimize() finds the maximum
-    return -(ret - risk_free_rate) / vol
 
 
 def _maximize_sharpe_ratio(
     tickers_df: pd.DataFrame,
     init_weights: np.ndarray,
+    l1_coeff: float,
     cov_matrix: np.ndarray,
     expected_returns: np.ndarray,
     risk_free_rate: float,
@@ -564,7 +605,9 @@ def _maximize_sharpe_ratio(
     tickers_df : pd.DataFrame
         Historical asset data used to extract ticker names.
     init_weights : np.ndarray
-        Initial weight allocation array.
+        Initial weight allocation array used as optimizer starting point and turnover baseline.
+    l1_coeff : float
+        L1 penalty coefficient applied to turnover (||w - init_weights||_1).
     cov_matrix : np.ndarray
         Annualized covariance matrix of asset returns.
     expected_returns : np.ndarray
@@ -584,11 +627,13 @@ def _maximize_sharpe_ratio(
     """
     num_assets = len(cov_matrix)
     constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
-    bounds = tuple((0, 0.4) for _ in range(num_assets))
+    bounds = tuple((0.05, 0.25) for _ in range(num_assets))
 
     res_max_sharpe = minimize(
         fun=lambda w: _max_sharpe_objective(
             w,
+            init_weights,
+            l1_coeff,
             expected_returns=expected_returns,
             risk_free_rate=risk_free_rate,
             cov_matrix=cov_matrix,
@@ -623,16 +668,59 @@ def _maximize_sharpe_ratio(
     return (max_sharpe, max_sharpe_stocks_weights)
 
 
+def _max_sharpe_objective(
+    weights: np.ndarray,
+    current_weights: np.ndarray,
+    l1_coeff: float,
+    expected_returns: np.ndarray,
+    risk_free_rate: float,
+    cov_matrix: np.ndarray,
+) -> float:
+    """
+    Objective function to find the maximum Sharpe ratio (returns negative Sharpe ratio for minimization).
+
+    Parameters
+    ----------
+    weights : np.ndarray
+        Array of candidate portfolio weights to optimize.
+    current_weights : np.ndarray
+        Current / baseline portfolio weights vector used to calculate rebalancing turnover.
+    l1_coeff : float
+        L1 penalty coefficient applied to turnover (||w - current_weights||_1).
+    expected_returns : np.ndarray
+        Array of expected annualized returns for the assets.
+    risk_free_rate : float
+        The annualized risk-free rate.
+    cov_matrix : np.ndarray
+        The annualized covariance matrix of the assets.
+
+    Returns
+    -------
+    float
+        The negative Sharpe ratio of the portfolio.
+    """
+    ret = np.dot(weights, expected_returns)
+    vol = np.sqrt(weights.T @ cov_matrix @ weights)
+
+    turnover = np.sum(np.abs(weights - current_weights))
+    penalty = l1_coeff * turnover
+
+    # negative Sharpe ratio so minimize() finds the maximum
+    return -((ret - risk_free_rate) / vol - penalty)
+
+
 def find_max_sortino(
     tickers_df: pd.DataFrame,
     rf_base: RiskFreeRateBase,
     cov_model: CovarianceModel = "CLASSIC",
     returns_model: ReturnsModel = "HISTORICAL",
-    opt_type: OptimizationType | None = None,
+    opt_type: OptimizationType = "BACKTEST",
     views: np.ndarray | None = None,
     views_transition: np.ndarray | None = None,
     bl_tau: float = 0.05,
     prediction_period: int = 1,
+    init_weights: np.ndarray | None = None,
+    l1_coeff: float = 0.0,
 ) -> tuple[SortinoRatio, pd.DataFrame]:
     """
     Optimizes portfolio weights to maximize the Sortino ratio (minimizing downside volatility).
@@ -650,7 +738,8 @@ def find_max_sortino(
         Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
         by default 'HISTORICAL'.
     opt_type : OptimizationType, optional
-        Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'), by default None.
+        Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'),
+        by default 'BACKTEST'.
     views : np.ndarray | None, optional
         Investor view vector Q for the Black-Litterman model, by default None.
     views_transition : np.ndarray | None, optional
@@ -661,6 +750,12 @@ def find_max_sortino(
     prediction_period : int, optional
         Forecast horizon in trading days for (E)GARCH volatility modeling,
         by default 1.
+    init_weights : np.ndarray | None, optional
+        Initial / current portfolio weights vector used as optimizer starting point and for
+        evaluating rebalancing turnover, by default None (initialized to equal weights).
+    l1_coeff : float, optional
+        L1 penalty coefficient applied to portfolio turnover (||w - w_init||_1)
+        to penalize excessive rebalancing, by default 0.0.
 
     Returns
     -------
@@ -677,14 +772,13 @@ def find_max_sortino(
         If the scipy SLSQP optimizer fails to find a solution.
     """
     # Calculate optimization params
-    num_assets = tickers_df.columns.levels[0].nunique()  # type: ignore
+    num_assets = tickers_df.columns.get_level_values(0).nunique()
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
-    init_weights = np.ones(num_assets) / num_assets
     expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
 
     match opt_type:
-        case "BACKTEST" | None:
+        case "BACKTEST":
             rf_start_date = (
                 pd.to_datetime(tickers_df.index[0]).tz_localize(None).to_pydatetime()
             )
@@ -745,51 +839,21 @@ def find_max_sortino(
             )
 
     # Find the Sortino Ratio optimum
+    init_weights = np.ones(num_assets) / num_assets
     return _maximize_sortino_ratio(
-        tickers_df, init_weights, log_ret, expected_returns, risk_free_rate
+        tickers_df,
+        init_weights,
+        l1_coeff,
+        log_ret,
+        expected_returns,
+        risk_free_rate,
     )
-
-
-def _max_sortino_objective(
-    weights: np.ndarray,
-    log_returns: np.ndarray,
-    expected_returns: np.ndarray,
-    risk_free_rate: float,
-) -> float:
-    """
-    Objective function to find the maximum Sortino ratio (returns negative Sortino ratio for minimization).
-
-    Parameters
-    ----------
-    weights : np.ndarray
-        Array of portfolio weights.
-    log_returns : np.ndarray
-        Matrix of daily logarithmic asset returns.
-    expected_returns : np.ndarray
-        Array of expected annualized returns for the assets.
-    risk_free_rate : float
-        Annualized risk-free rate.
-
-    Returns
-    -------
-    float
-        The negative Sortino ratio of the portfolio.
-    """
-    ret = np.dot(weights, expected_returns)
-
-    daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
-    square_negative_deviations = np.minimum(0, weights @ log_returns.T - daily_rf) ** 2
-    downside_vol = np.sqrt((square_negative_deviations).mean(axis=0)) * np.sqrt(
-        TRADING_DAYS_PER_YEAR
-    )
-
-    # negative Sortino ratio so minimize() finds the maximum
-    return -(ret - risk_free_rate) / downside_vol
 
 
 def _maximize_sortino_ratio(
     tickers_df: pd.DataFrame,
     init_weights: np.ndarray,
+    l1_coeff: float,
     log_returns: np.ndarray,
     expected_returns: np.ndarray,
     risk_free_rate: float,
@@ -802,7 +866,9 @@ def _maximize_sortino_ratio(
     tickers_df : pd.DataFrame
         Historical asset data used to extract ticker names.
     init_weights : np.ndarray
-        Initial weight allocation array.
+        Initial weight allocation array used as optimizer starting point and turnover baseline.
+    l1_coeff : float
+        L1 penalty coefficient applied to turnover (||w - init_weights||_1).
     log_returns : np.ndarray
         Matrix of daily logarithmic asset returns.
     expected_returns : np.ndarray
@@ -820,9 +886,9 @@ def _maximize_sortino_ratio(
     RuntimeError
         If the SLSQP optimizer fails to converge.
     """
-    num_assets = len(init_weights)
+    num_assets = tickers_df.columns.get_level_values(0).nunique()
     constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
-    bounds = tuple((0, 0.4) for _ in range(num_assets))
+    bounds = tuple((0.05, 0.25) for _ in range(num_assets))
 
     daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
     square_negative_deviations = np.minimum(0, log_returns - daily_rf) ** 2
@@ -830,6 +896,8 @@ def _maximize_sortino_ratio(
     res_max_sortino = minimize(
         fun=lambda w: _max_sortino_objective(
             w,
+            init_weights,
+            l1_coeff,
             log_returns,
             expected_returns=expected_returns,
             risk_free_rate=risk_free_rate,
@@ -870,3 +938,49 @@ def _maximize_sortino_ratio(
         )
 
     return (max_sortino, max_sortino_stocks_weights)
+
+
+def _max_sortino_objective(
+    weights: np.ndarray,
+    current_weights: np.ndarray,
+    l1_coeff: float,
+    log_returns: np.ndarray,
+    expected_returns: np.ndarray,
+    risk_free_rate: float,
+) -> float:
+    """
+    Objective function to find the maximum Sortino ratio (returns negative Sortino ratio for minimization).
+
+    Parameters
+    ----------
+    weights : np.ndarray
+        Array of candidate portfolio weights to optimize.
+    current_weights : np.ndarray
+        Current / baseline portfolio weights vector used to calculate rebalancing turnover.
+    l1_coeff : float
+        L1 penalty coefficient applied to turnover (||w - current_weights||_1).
+    log_returns : np.ndarray
+        Matrix of daily logarithmic asset returns.
+    expected_returns : np.ndarray
+        Array of expected annualized returns for the assets.
+    risk_free_rate : float
+        Annualized risk-free rate.
+
+    Returns
+    -------
+    float
+        The negative Sortino ratio of the portfolio.
+    """
+    ret = np.dot(weights, expected_returns)
+
+    turnover = np.sum(np.abs(weights - current_weights))
+    penalty = l1_coeff * turnover
+
+    daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
+    square_negative_deviations = np.minimum(0, weights @ log_returns.T - daily_rf) ** 2
+    downside_vol = np.sqrt((square_negative_deviations).mean(axis=0)) * np.sqrt(
+        TRADING_DAYS_PER_YEAR
+    )
+
+    # negative Sortino ratio so minimize() finds the maximum
+    return -((ret - risk_free_rate) / downside_vol - penalty)
