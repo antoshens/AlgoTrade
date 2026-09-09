@@ -27,6 +27,7 @@ def log_returns(stocks: PandasData) -> PandasData:
     if stocks is None:
         raise ValueError("The stocks input DataFrame is None.")
 
+    stocks = stocks.dropna()
     if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
         level_name = "Price" if "Price" in stocks.columns.names else 1
         close_prices = stocks.xs("Close", axis=1, level=level_name)
@@ -63,6 +64,7 @@ def overnight_gaps_prc(stocks: pd.DataFrame) -> pd.DataFrame:
     if stocks is None:
         raise ValueError("The stocks input DataFrame is None.")
 
+    stocks = stocks.dropna()
     if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
         level_name = "Price" if "Price" in stocks.columns.names else 1
         open_prices = stocks.xs("Open", axis=1, level=level_name)
@@ -125,6 +127,7 @@ def intraday_returns_prc(stocks: pd.DataFrame) -> pd.DataFrame:
     if stocks is None:
         raise ValueError("The stocks input DataFrame is None.")
 
+    stocks = stocks.dropna()
     if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
         level_name = "Price" if "Price" in stocks.columns.names else 1
         open_prices = stocks.xs("Open", axis=1, level=level_name)
@@ -167,6 +170,7 @@ def daily_spread_pct(stocks: pd.DataFrame) -> pd.DataFrame:
     if stocks is None:
         raise ValueError("The stocks input DataFrame is None.")
 
+    stocks = stocks.dropna()
     if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
         level_name = "Price" if "Price" in stocks.columns.names else 1
         close_prices = stocks.xs("Close", axis=1, level=level_name)

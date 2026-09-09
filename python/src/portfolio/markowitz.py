@@ -231,6 +231,7 @@ def optimize_portfolio(
         If an unrecognized `opt_type`, `cov_model`, or `returns_model` entry is provided.
     """
     # Calculate optimization params
+    tickers_df = tickers_df.dropna()
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
     expected_returns = np.array(log_ret_df.mean(axis=0) * TRADING_DAYS_PER_YEAR)
@@ -511,6 +512,7 @@ def find_max_sharpe(
         If the scipy SLSQP optimizer fails to find a solution.
     """
     # Calculate optimization params
+    tickers_df = tickers_df.dropna()
     num_assets = tickers_df.columns.get_level_values(0).nunique()
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
@@ -550,12 +552,16 @@ def find_max_sharpe(
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+            sample_vols = np.sqrt(np.diag(cov_matrix))
+            corr_matrix = cov_matrix / np.outer(sample_vols, sample_vols)
+
             (garch_ret, garch_vol) = garch(
                 log_ret, prediction_period, arch_type=cov_model
             )
+
             expected_returns = garch_ret
             garch_vol_diag = np.diag(garch_vol)
-            cov_matrix = garch_vol_diag @ cov_matrix @ garch_vol_diag
+            cov_matrix = garch_vol_diag @ corr_matrix @ garch_vol_diag
         case _:
             raise ValueError(f"Unrecognized cov_model param value: {cov_model}.")
 
@@ -772,6 +778,7 @@ def find_max_sortino(
         If the scipy SLSQP optimizer fails to find a solution.
     """
     # Calculate optimization params
+    tickers_df = tickers_df.dropna()
     num_assets = tickers_df.columns.get_level_values(0).nunique()
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
@@ -890,23 +897,23 @@ def _maximize_sortino_ratio(
     constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
     bounds = tuple((0.05, 0.25) for _ in range(num_assets))
 
-    daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
-    square_negative_deviations = np.minimum(0, log_returns - daily_rf) ** 2
-
     res_max_sortino = minimize(
         fun=lambda w: _max_sortino_objective(
             w,
             init_weights,
             l1_coeff,
             log_returns,
-            expected_returns=expected_returns,
-            risk_free_rate=risk_free_rate,
+            expected_returns,
+            risk_free_rate,
         ),
         x0=init_weights,
         method="SLSQP",
         bounds=bounds,
         constraints=constraints,
     )
+
+    daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
+    square_negative_deviations = np.minimum(0, log_returns - daily_rf) ** 2
 
     if res_max_sortino.success:
         optimal_weights = res_max_sortino.x

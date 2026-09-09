@@ -45,6 +45,9 @@ def garch(
     scaled_log_returns = (log_returns * scale).reshape(-1, num_assets)
     next_period_returns: np.ndarray = np.zeros(num_assets)
     next_period_vol: np.ndarray = np.zeros(num_assets)
+    dist = (
+        "normal" if (arch_type == "EGARCH") else "studentst"
+    )  # Student's t-dist instead of Gauss for fat-tails
 
     for i, tr in enumerate(scaled_log_returns.T):
         model = arch_model(
@@ -53,14 +56,19 @@ def garch(
             vol=arch_type,
             p=1,  # Lagged Conditional Variance
             q=1,  # Lagged Squared Shock
-            dist="studentst",  # Student's t-dist instead of Gauss for fat-tails
+            dist=dist,
         )
 
         # Model training
-        arch_res = model.fit(disp="off")
+        arch_res = model.fit(disp="off", options={"maxiter": 300, "ftol": 1e-4})
 
         # Forecast volatility for next period (Current + t)
-        forecasts = arch_res.forecast(horizon=t)  # forecast for t days
+        forecast_method = (
+            "simulation" if (arch_type == "EGARCH" and t > 1) else "analytic"
+        )
+        forecasts = arch_res.forecast(
+            horizon=t, method=forecast_method
+        )  # forecast for t days
 
         # Volatility for (Current + t) (converted back to decimal)
         next_period_variance = (
