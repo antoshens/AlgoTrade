@@ -518,6 +518,9 @@ def find_max_sharpe(
     log_ret = np.array(log_ret_df)
     expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
 
+    if init_weights is None:
+        init_weights = np.ones(num_assets) / num_assets
+
     match opt_type:
         case "BACKTEST":
             rf_start_date = (
@@ -566,7 +569,6 @@ def find_max_sharpe(
             raise ValueError(f"Unrecognized cov_model param value: {cov_model}.")
 
     # Choose returns estimation model
-    init_weights = np.ones(num_assets) / num_assets
     match returns_model:
         case "BLACK_LITTERMAN":
             (expected_returns, cov_matrix) = black_litterman(
@@ -784,6 +786,9 @@ def find_max_sortino(
     log_ret = np.array(log_ret_df)
     expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
 
+    if init_weights is None:
+        init_weights = np.ones(num_assets) / num_assets
+
     match opt_type:
         case "BACKTEST":
             rf_start_date = (
@@ -846,7 +851,6 @@ def find_max_sortino(
             )
 
     # Find the Sortino Ratio optimum
-    init_weights = np.ones(num_assets) / num_assets
     return _maximize_sortino_ratio(
         tickers_df,
         init_weights,
