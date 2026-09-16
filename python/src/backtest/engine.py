@@ -1,7 +1,7 @@
 """Portfolio backtesting engine with rolling out-of-sample evaluation.
 
 Provides backtesting capabilities for portfolio optimization strategies
-(e.g., GARCH Sharpe, EGARCH Sortino) against an equal-weighted benchmark portfolio
+(e.g., GARCH Sharpe, GARCH Sortino, EGARCH Sortino) against an equal-weighted benchmark portfolio
 and the S&P 500 (^GSPC), factoring in transaction costs, rebalancing cycles,
 and daily asset weight drift.
 """
@@ -35,12 +35,13 @@ Options:
 - 'STRUCTURAL_COST': Dynamic structural penalty calibrated against transaction costs, turnover, portfolio value, and rebalance frequency.
 """
 
-OptimizationMetric = Literal["GARCH_SHARPE", "EGARCH_SORTINO"]
+OptimizationMetric = Literal["GARCH_SHARPE", "GARCH_SORTINO", "EGARCH_SORTINO"]
 """
 Objective metric and volatility model combination for portfolio optimization.
 
 Options:
-- 'GARCH_SHARPE': Maximizes Sharpe ratio using GARCH(1,1) conditional volatility and covariance.
+- 'GARCH_SHARPE': Maximizes Sharpe ratio using GARCH(t,t) conditional volatility and covariance.
+- 'GARCH_SORTINO': Maximizes Sortino ratio using GARCH(t,t) conditional volatility and downside variance.
 - 'EGARCH_SORTINO': Maximizes Sortino ratio using EGARCH(1,1) asymmetric conditional volatility and downside variance.
 """
 
@@ -51,6 +52,8 @@ class Turnover:
 
     Attributes
     ----------
+    turnover : float
+        Total portfolio turnover fraction (sum of absolute weight changes).
     portfolio_value : float
         Updated portfolio capital after deducting turnover transaction costs.
     weights_drift : np.ndarray
@@ -109,7 +112,7 @@ def _calculate_turnover(
     Returns
     -------
     Turnover
-        Dataclass containing updated portfolio_value, weights_drift, and turnover_cost.
+        Dataclass containing turnover, updated portfolio_value, weights_drift, and turnover_cost.
     """
     turnover = np.abs(opt_weights - w_drift).sum() if w_drift is not None else turnover
     t_cost = turnover * broker_commission
@@ -196,10 +199,16 @@ def perform_backtesting(
         Initial investment capital (e.g., 10,000.0).
     optimization_metric : OptimizationMetric
         Objective metric for optimization. Options:
-        - "GARCH_SHARPE": Maximize Sharpe ratio with GARCH(1,1) covariance.
-        - "EGARCH_SORTINO": Maximize Sortino ratio with EGARCH(1,1) covariance.
+        - "GARCH_SHARPE": Maximize Sharpe ratio with GARCH(t,t) covariance.
+        - "GARCH_SORTINO": Maximize Sortino ratio with GARCH(t,t) downside variance.
+        - "EGARCH_SORTINO": Maximize Sortino ratio with EGARCH(1,1) asymmetric downside variance.
     returns_model : ReturnsModel
-        Expected returns estimation model (e.g., "HISTORICAL", "CAPM", "BLACK_LITTERMAN").
+        Expected returns estimation model. Options:
+        - "HISTORICAL": Mean historical returns scaled by trading days.
+        - "BLACK_LITTERMAN": Black-Litterman model incorporating market capitalization and investor views.
+    sp500_history : pd.DataFrame | None, default=None
+        Historical price data for the S&P 500 (^GSPC) benchmark, structured as a pandas
+        MultiIndex DataFrame with ('Ticker', 'Price') columns containing 'Close'.
     lookback_window : int, default=504
         Number of historical trading days in the in-sample training window (~2 years).
     rebalancing_period : int, default=21
@@ -221,7 +230,7 @@ def perform_backtesting(
         - 'equal_portfolio_daily_return': Daily return of the equal-weighted portfolio.
         - 'portfolio_value': Cumulative equity curve of the optimized portfolio.
         - 'equal_portfolio_value': Cumulative equity curve of the equal-weighted portfolio.
-        - 'sp500_value': Cumulative equity curve of the S&P 500 benchmark.
+        - 'sp500_value': Cumulative equity curve of the S&P 500 benchmark (present only if sp500_history is provided).
 
     Raises
     ------
@@ -282,6 +291,17 @@ def perform_backtesting(
         match optimization_metric:
             case "GARCH_SHARPE":
                 (metric, opt_weights) = find_max_sharpe(
+                    training_sample,
+                    "T_BILLS",
+                    "GARCH",
+                    returns_model,
+                    "BACKTEST",
+                    prediction_period=rebalancing_period,
+                    init_weights=weights_drift,
+                    l1_coeff=penalty,
+                )
+            case "GARCH_SORTINO":
+                (metric, opt_weights) = find_max_sortino(
                     training_sample,
                     "T_BILLS",
                     "GARCH",
