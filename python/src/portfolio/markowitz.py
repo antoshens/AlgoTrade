@@ -11,6 +11,7 @@ Supports:
 - L1 rebalancing turnover penalties to control portfolio drift and transaction costs.
 """
 
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
@@ -493,6 +494,8 @@ def find_max_sharpe(
     init_weights : np.ndarray | None, optional
         Initial / current portfolio weights vector used as optimizer starting point and for
         evaluating rebalancing turnover, by default None (initialized to equal weights).
+        If provided, weights are rescaled from percentages if needed, clipped to [0.05, 0.25],
+        and normalized to sum to 1.
     l1_coeff : float, optional
         L1 penalty coefficient applied to portfolio turnover (||w - w_init||_1)
         to penalize excessive rebalancing, by default 0.0.
@@ -508,8 +511,11 @@ def find_max_sharpe(
     ------
     ValueError
         If an unrecognized `opt_type`, `cov_model`, or `returns_model` entry is provided.
-    RuntimeError
-        If the scipy SLSQP optimizer fails to find a solution.
+
+    Warns
+    -----
+    UserWarning
+        If the scipy SLSQP optimizer fails to converge, falls back to `init_weights`.
     """
     # Calculate optimization params
     tickers_df = tickers_df.dropna()
@@ -520,6 +526,10 @@ def find_max_sharpe(
 
     if init_weights is None:
         init_weights = np.ones(num_assets) / num_assets
+    else:
+        init_weights = np.array([w / 100 if w > 1 else w for w in init_weights])
+        init_weights = np.clip(init_weights, 0.05, 0.25)
+        init_weights = init_weights / sum(init_weights)
 
     match opt_type:
         case "BACKTEST":
@@ -628,10 +638,10 @@ def _maximize_sharpe_ratio(
     tuple[SharpeRatio, pd.DataFrame]
         Optimal SharpeRatio metrics and DataFrame of percentage weights per asset.
 
-    Raises
-    ------
-    RuntimeError
-        If the SLSQP optimizer fails to converge.
+    Warns
+    -----
+    UserWarning
+        If the SLSQP optimizer fails to converge, falls back to `init_weights`.
     """
     num_assets = len(cov_matrix)
     constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
@@ -654,24 +664,25 @@ def _maximize_sharpe_ratio(
 
     if res_max_sharpe.success:
         optimal_weights = res_max_sharpe.x
-        exact_max_ret = np.dot(optimal_weights, expected_returns)
-        exact_max_vol = np.sqrt(optimal_weights.T @ cov_matrix @ optimal_weights)
-        exact_max_sharpe = (exact_max_ret - risk_free_rate) / exact_max_vol
-
-        max_sharpe_stocks_weights = pd.DataFrame()
-        tickers = tickers_df.columns.get_level_values(0).unique()
-        for i, (name) in enumerate(tickers):
-            max_sharpe_stocks_weights[name] = [round(optimal_weights[i], 2) * 100]
-
-        max_sharpe = SharpeRatio(
-            max_sharpe=exact_max_sharpe,
-            tangency_return=exact_max_ret,
-            tangency_vol=exact_max_vol,
-        )
     else:
-        raise RuntimeError(
-            "The optimizator finished work with an error or was aborted."
-        )
+        optimal_weights = init_weights
+
+        warnings.warn("The optimizator finished work with an error or was aborted.")
+
+    exact_max_ret = np.dot(optimal_weights, expected_returns)
+    exact_max_vol = float(np.sqrt(optimal_weights.T @ cov_matrix @ optimal_weights))
+    exact_max_sharpe = (exact_max_ret - risk_free_rate) / exact_max_vol
+
+    max_sharpe_stocks_weights = pd.DataFrame()
+    tickers = tickers_df.columns.get_level_values(0).unique()
+    for i, (name) in enumerate(tickers):
+        max_sharpe_stocks_weights[name] = [round(optimal_weights[i], 2) * 100]
+
+    max_sharpe = SharpeRatio(
+        max_sharpe=exact_max_sharpe,
+        tangency_return=exact_max_ret,
+        tangency_vol=exact_max_vol,
+    )
 
     return (max_sharpe, max_sharpe_stocks_weights)
 
@@ -761,6 +772,8 @@ def find_max_sortino(
     init_weights : np.ndarray | None, optional
         Initial / current portfolio weights vector used as optimizer starting point and for
         evaluating rebalancing turnover, by default None (initialized to equal weights).
+        If provided, weights are rescaled from percentages if needed, clipped to [0.05, 0.25],
+        and normalized to sum to 1.
     l1_coeff : float, optional
         L1 penalty coefficient applied to portfolio turnover (||w - w_init||_1)
         to penalize excessive rebalancing, by default 0.0.
@@ -776,8 +789,11 @@ def find_max_sortino(
     ------
     ValueError
         If an unrecognized `opt_type`, `cov_model`, or `returns_model` entry is provided.
-    RuntimeError
-        If the scipy SLSQP optimizer fails to find a solution.
+
+    Warns
+    -----
+    UserWarning
+        If the scipy SLSQP optimizer fails to converge, falls back to `init_weights`.
     """
     # Calculate optimization params
     tickers_df = tickers_df.dropna()
@@ -788,6 +804,10 @@ def find_max_sortino(
 
     if init_weights is None:
         init_weights = np.ones(num_assets) / num_assets
+    else:
+        init_weights = np.array([w / 100 if w > 1 else w for w in init_weights])
+        init_weights = np.clip(init_weights, 0.05, 0.25)
+        init_weights = init_weights / sum(init_weights)
 
     match opt_type:
         case "BACKTEST":
@@ -892,10 +912,10 @@ def _maximize_sortino_ratio(
     tuple[SortinoRatio, pd.DataFrame]
         Optimal SortinoRatio metrics and DataFrame of percentage weights per asset.
 
-    Raises
-    ------
-    RuntimeError
-        If the SLSQP optimizer fails to converge.
+    Warns
+    -----
+    UserWarning
+        If the SLSQP optimizer fails to converge, falls back to `init_weights`.
     """
     num_assets = tickers_df.columns.get_level_values(0).nunique()
     constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
@@ -921,32 +941,32 @@ def _maximize_sortino_ratio(
 
     if res_max_sortino.success:
         optimal_weights = res_max_sortino.x
-        exact_max_ret = optimal_weights @ expected_returns
-
-        daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
-        square_negative_deviations = (
-            np.minimum(0, optimal_weights @ log_returns.T - daily_rf) ** 2
-        )
-        exact_max_negative_vol = np.sqrt(
-            (square_negative_deviations).mean(axis=0)
-        ) * np.sqrt(TRADING_DAYS_PER_YEAR)
-
-        exact_max_sortino = (exact_max_ret - risk_free_rate) / exact_max_negative_vol
-
-        max_sortino_stocks_weights = pd.DataFrame()
-        tickers = tickers_df.columns.get_level_values(0).unique()
-        for i, (name) in enumerate(tickers):
-            max_sortino_stocks_weights[name] = [round(optimal_weights[i], 2) * 100]
-
-        max_sortino = SortinoRatio(
-            max_sortino=exact_max_sortino,
-            tangency_return=exact_max_ret,
-            tangency_vol=exact_max_negative_vol,
-        )
     else:
-        raise RuntimeError(
-            "The optimizator finished work with an error or was aborted."
-        )
+        optimal_weights = init_weights
+
+        warnings.warn("The optimizator finished work with an error or was aborted.")
+
+    exact_max_ret = np.dot(optimal_weights, expected_returns)
+    daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
+    square_negative_deviations = (
+        np.minimum(0, optimal_weights @ log_returns.T - daily_rf) ** 2
+    )
+    exact_max_negative_vol = np.sqrt(
+        (square_negative_deviations).mean(axis=0)
+    ) * np.sqrt(TRADING_DAYS_PER_YEAR)
+
+    exact_max_sortino = (exact_max_ret - risk_free_rate) / exact_max_negative_vol
+
+    max_sortino_stocks_weights = pd.DataFrame()
+    tickers = tickers_df.columns.get_level_values(0).unique()
+    for i, (name) in enumerate(tickers):
+        max_sortino_stocks_weights[name] = [round(optimal_weights[i], 2) * 100]
+
+    max_sortino = SortinoRatio(
+        max_sortino=exact_max_sortino,
+        tangency_return=exact_max_ret,
+        tangency_vol=exact_max_negative_vol,
+    )
 
     return (max_sortino, max_sortino_stocks_weights)
 
