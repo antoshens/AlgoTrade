@@ -1,119 +1,153 @@
-# AlgoTrade
+# 📈 AlgoTrade
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<p align="center">
+  <strong>Algorithmic Trading & Portfolio Optimization Engine</strong>
+</p>
+
+<p align="center">
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-success?style=for-the-badge" alt="License: MIT"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Status-Active%20Development-blueviolet?style=for-the-badge" alt="Status"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Quant-Finance-informational?style=for-the-badge" alt="Quant Finance"></a>
+  <a href="#"><img src="https://img.shields.io/badge/PRs-Welcome-brightgreen.svg?style=for-the-badge" alt="PRs Welcome"></a>
+</p>
+
+---
 
 An algorithmic trading, portfolio optimization, and quantitative backtesting engine implemented in Python. AlgoTrade combines Modern Portfolio Theory (MPT), econometric volatility forecasting, and realistic market microstructure execution modeling.
 
 ---
 
-## Overview
+## 🌟 Overview
 
-AlgoTrade provides tools for quantitative asset allocation, risk modeling, and strategy backtesting. The platform evaluates portfolios under realistic execution conditions, accounting for asset weight drift, broker commissions, and rebalancing turnover costs.
+AlgoTrade provides modular tools for quantitative asset allocation, risk modeling, and strategy backtesting. The platform evaluates portfolios under realistic execution conditions, accounting for asset weight drift, broker commissions, and rebalancing turnover costs.
 
-## Key Features
+---
 
-- **Portfolio Optimization & Modern Portfolio Theory**
-  - Mean-Variance Optimization and Efficient Frontier generation.
-  - Objective functions: Maximum Sharpe Ratio (tangency portfolio) and Maximum Sortino Ratio (downside risk optimization).
-  - Covariance estimators: Sample Covariance, Ledoit-Wolf Shrinkage, and GARCH/EGARCH conditional volatility.
-  - Expected returns models: Historical mean log returns and the Black-Litterman model incorporating market equilibrium priors and subjective views.
-  - Turnover regularisation via L1 penalties (fixed or structural cost coupling) to limit portfolio churn.
-  - Risk-free rate fetching from FRED (13-week T-Bills, 10-year Treasury Notes, and SOFR).
+## ⚡ Key Features
 
-- **Econometric & Volatility Modeling**
-  - Univariate GARCH(1,1) and EGARCH(1,1) volatility forecasting with Student's t-distribution for heavy-tailed financial returns.
-  - Microstructure and proxy metrics: Parkinson volatility, Corwin-Schultz bid-ask spread estimators, and overnight gap analytics.
+### 🎯 Portfolio Optimization & Modern Portfolio Theory
+- 📊 **Mean-Variance Optimization**: Efficient Frontier generation via classical Markowitz formulation.
+- 🎯 **Dual Objective Functions**:
+  - **Maximum Sharpe Ratio**: Identifies the tangency portfolio against specified risk-free benchmarks.
+  - **Maximum Sortino Ratio**: Optimizes for downside risk using lower partial moments.
+- 📐 **Covariance Estimators**:
+  - Sample Covariance Matrix (annualized).
+  - Ledoit-Wolf Shrinkage covariance estimator for high-dimensional stability.
+  - Univariate (E)GARCH conditional volatility projections.
+- 🔮 **Expected Returns Modeling**:
+  - Historical mean log returns.
+  - **Black-Litterman Model**: Blends market equilibrium priors with subjective investor views and confidence intervals.
+- ⚖️ **Turnover Regularization**: L1 penalties (fixed or structural cost coupling) to constrain transaction costs and portfolio churn.
+- 🏦 **Macro Risk-Free Benchmarks**: Direct FRED rate fetching for 13-week T-Bills (`^IRX`), 10-year Treasury Notes (`^TNX`), and SOFR (`SR3=F`).
 
-- **Out-of-Sample Backtesting Engine**
-  - Walk-forward rolling simulation with configurable lookback windows and rebalancing schedules.
-  - Execution realism: models transaction costs, turnover drag, and daily intra-period asset weight drift.
-  - Benchmark comparison against equal-weighted allocations and the S&P 500 (`^GSPC`).
+### 📉 Econometric & Volatility Modeling
+- 🔬 **GARCH & EGARCH Models**: Univariate GARCH(1,1) and Exponential GARCH(1,1) with Student's $t$-distribution to capture return fat-tails and volatility clustering.
+- 🔍 **Market Microstructure Analytics**:
+  - Parkinson extreme-value rolling volatility estimator.
+  - Corwin-Schultz high-low bid-ask spread estimators.
+  - Overnight price gap distributions and intraday return analytics.
 
-- **Performance & Risk Metrics**
-  - Compound Annual Growth Rate (CAGR)
-  - Maximum Drawdown (MDD)
-  - Annualized Sharpe and Sortino Ratios
-  - Calmar Ratio
-  - Rolling risk-adjusted performance profiles
+### 🔄 Out-of-Sample Backtesting Engine
+- 🔁 **Walk-Forward Evaluation**: Rolling train-and-test windows with customizable lookback periods and rebalancing cycles.
+- 🛡️ **Execution Realism**: Simulates broker turnover commissions, transaction drag, and intra-period asset weight drift.
+- 🏁 **Benchmark Comparison**: Automatic tracking against equal-weighted allocations and the S&P 500 (`^GSPC`).
 
-## Project Structure
+### 📊 Performance & Risk Analytics
+- 📈 **CAGR**: Compound Annual Growth Rate.
+- 📉 **Max Drawdown (MDD)**: Peak-to-trough equity degradation.
+- ⚖️ **Risk-Adjusted Ratios**: Sharpe Ratio, Sortino Ratio, and Calmar Ratio.
+- 🌊 **Rolling Metrics**: Dynamic rolling Sharpe and Sortino ratio tracking over time.
+
+---
+
+## 🗂️ Project Structure
 
 ```text
 AlgoTrade/
-├── data/                    # Market data acquisition and time-series preprocessing
-│   ├── download_data.py     # Yahoo Finance data ingestion
-│   ├── processors.py        # Returns, spreads, volatility, and market feature extraction
+├── data/                    # 📥 Market data retrieval and preprocessing
+│   ├── download_data.py     # Yahoo Finance historical ingestion
+│   ├── processors.py        # Returns, spreads, volatility, and feature engineering
 │   └── constants.py         # Trading constants and default parameters
 ├── src/
-│   ├── portfolio/           # Optimization, Black-Litterman, and GARCH modules
-│   │   ├── markowitz.py     # Mean-variance optimization and frontier routines
+│   ├── portfolio/           # 🧠 Optimization and econometric models
+│   │   ├── markowitz.py     # Mean-variance optimization & efficient frontier
 │   │   ├── black_litterman.py # Black-Litterman allocation model
-│   │   └── garch.py         # ARCH/GARCH conditional volatility forecasting
-│   └── backtest/            # Backtesting engine and performance analytics
-│       ├── engine.py        # Walk-forward simulation and turnover execution
-│       └── metrics.py       # Quantitative performance and drawdown metrics
-├── notebooks/               # Research notebooks and exploratory analysis
-│   ├── market_analysis/     # Return distributions, market memory, and volatility
-│   ├── modern_portfolio_theory/ # Optimization and shrinkage experiments
+│   │   └── garch.py         # ARCH / GARCH conditional volatility forecasting
+│   └── backtest/            # ⚙️ Walk-forward backtesting and metrics
+│       ├── engine.py        # Rolling simulation & turnover execution
+│       └── metrics.py       # Performance, drawdown, and risk ratios
+├── notebooks/               # 📓 Research and exploratory workflows
+│   ├── market_analysis/     # Distributions, market memory, and volatility
+│   ├── modern_portfolio_theory/ # Shrinkage & optimization experiments
 │   └── models_backtesting/  # Strategy backtesting walkthroughs
-├── pyproject.toml           # Package configuration
-└── requirements.txt         # Project dependencies
+├── pyproject.toml           # 📦 Packaging configuration
+└── requirements.txt         # 📋 Project dependencies
 ```
 
-## Installation
+---
 
-### Prerequisites
-- Python 3.11 or higher
-- Git
+## 🚀 Installation & Setup
 
-### Setup
+### 📋 Prerequisites
+- **Python 3.11+**
+- **Git**
 
-1. Clone the repository:
+### 💻 Installation Steps
+
+1. **Clone the repository:**
    ```bash
    git clone https://github.com/<username>/AlgoTrade.git
    cd AlgoTrade
    ```
 
-2. Create and activate a virtual environment:
+2. **Create and activate a virtual environment:**
    ```bash
+   # Create virtual environment
    python -m venv .venv
-   # Windows:
+
+   # Activate on Windows:
    .venv\Scripts\activate
-   # Linux/macOS:
+
+   # Activate on Linux / macOS:
    source .venv/bin/activate
    ```
 
-3. Install dependencies:
+3. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
-   Or install the package in editable mode:
+   *Optional: Install package in editable development mode:*
    ```bash
    pip install -e .
    ```
 
-## Usage
+---
 
-### 1. Market Data Ingestion
+## 💡 Quickstart & Usage
+
+### 1️⃣ Market Data Ingestion
 ```python
 from datetime import datetime
 from data.download_data import download_tickers_history
 
-start = datetime(2020, 1, 1)
-end = datetime(2024, 1, 1)
+# Fetch historical daily data for a basket of assets
+start_date = datetime(2020, 1, 1)
+end_date = datetime(2024, 1, 1)
 tickers = ["AAPL", "MSFT", "GOOGL", "AMZN"]
 
-data = download_tickers_history(start_date=start, end_date=end, tickers=tickers)
+prices_df = download_tickers_history(
+    start_date=start_date, end_date=end_date, tickers=tickers
+)
 ```
 
-### 2. Portfolio Optimization
+### 2️⃣ Portfolio Optimization
 ```python
 from src.portfolio import optimize_portfolio
 
-# Calculate the efficient frontier using Ledoit-Wolf covariance shrinkage
+# Compute the Efficient Frontier with Ledoit-Wolf shrinkage & L1 turnover penalty
 frontier_df = optimize_portfolio(
-    tickers_df=data,
+    tickers_df=prices_df,
     rf_base="T_BILLS",
     cov_model="LEDOIT_WOLF",
     returns_model="HISTORICAL",
@@ -124,41 +158,51 @@ frontier_df = optimize_portfolio(
 print(frontier_df.head())
 ```
 
-### 3. Strategy Backtesting
+### 3️⃣ Strategy Backtesting
 ```python
 from src.backtest import perform_backtesting
 
-results = perform_backtesting(
-    tickers_df=data,
+# Run out-of-sample walk-forward backtest
+backtest_results = perform_backtesting(
+    tickers_df=prices_df,
     init_portfolio_value=10000.0,
     optimization_metric="GARCH_SHARPE",
     returns_model="HISTORICAL",
-    lookback_window=504,
-    rebalancing_period=21,
-    broker_commission=0.0005,
+    lookback_window=504,       # ~2 years training window
+    rebalancing_period=21,     # Rebalance monthly
+    broker_commission=0.0005,  # 5 bps transaction fee
     l1_penalty_type="FIXED",
 )
 
-print(results[["portfolio_value", "equal_portfolio_value"]].tail())
+print(backtest_results[["portfolio_value", "equal_portfolio_value"]].tail())
 ```
 
-## Research Notebooks
+---
 
-The `notebooks/` directory contains research workflows and exploratory analysis:
-- **Market Analysis**: Statistical distribution testing, volatility clustering, and market memory.
-- **Modern Portfolio Theory**: Empirical evaluations of sample covariance, Ledoit-Wolf shrinkage, and Black-Litterman models.
-- **Models Backtesting**: Out-of-sample backtesting runs for GARCH- and EGARCH-based asset allocation strategies.
+## 🔬 Research Notebooks
 
-## Roadmap
+Interactive Jupyter notebooks are organized in the [`notebooks/`](notebooks/) directory:
+- 📊 **Market Analysis**: Statistical return distribution tests, fat-tail behavior, and volatility clustering.
+- 📐 **Modern Portfolio Theory**: Empirical comparisons across Sample Covariance, Ledoit-Wolf Shrinkage, and Black-Litterman models.
+- 🧪 **Models Backtesting**: Walk-forward backtesting demonstrations evaluating GARCH and EGARCH allocation strategies.
 
-- [ ] Local Large Language Model (LLM) integration to extract subjective views for the Black-Litterman model from financial news and filings.
-- [ ] Non-linear transaction cost modeling and dynamic slippage estimation.
-- [ ] Broker API integration for live execution.
+---
 
-## Disclaimer
+## 🗺️ Roadmap
 
-This software is provided strictly for research and educational purposes. It does not constitute investment, financial, or trading advice.
+- [ ] 🤖 **Local LLM Integration**: Incorporate local Large Language Models to synthesize market sentiment and financial filings into Black-Litterman investor views.
+- [ ] 📉 **Non-Linear Slippage**: Dynamic impact cost modeling based on trading volume and order book depth.
+- [ ] 🔌 **Live Execution Connector**: Interactive Brokers (IBKR) API integration for automated paper and live trade execution.
 
-## License
+---
 
-This project is licensed under the MIT License.
+## ⚠️ Disclaimer
+
+> [!WARNING]
+> This software is intended strictly for research and educational purposes. It does not constitute financial, investment, or trading advice. Past performance simulated in backtests is no guarantee of future returns.
+
+---
+
+## 📜 License
+
+Distributed under the **MIT License**. See `LICENSE` for more information.
