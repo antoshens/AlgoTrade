@@ -1,4 +1,4 @@
- [build-system]
+[build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
@@ -6,3 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "algo_trade"
 version = "0.1.0"
 dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["data*", "src*"]

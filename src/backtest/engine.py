@@ -11,6 +11,7 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
+
 from data import (
     RISK_UNACCEPTANCE_VALUE,
     TRADING_DAYS_PER_YEAR,

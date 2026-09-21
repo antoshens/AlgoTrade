@@ -2,6 +2,7 @@ from typing import Literal
 
 import numpy as np
 from arch import arch_model
+
 from data.constants import TRADING_DAYS_PER_YEAR
 
 ArchType = Literal["GARCH", "EGARCH"]

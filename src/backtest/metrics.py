@@ -9,8 +9,9 @@ rolling Sharpe ratio, Sortino ratio, rolling Sortino ratio, and Calmar ratio.
 from datetime import datetime
 
 import numpy as np
-from data.constants import TRADING_DAYS_PER_YEAR
 from numpy.lib.stride_tricks import sliding_window_view
+
+from data.constants import TRADING_DAYS_PER_YEAR
 from src.portfolio import get_risk_free_rate
 
 

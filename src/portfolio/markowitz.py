@@ -18,10 +18,11 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from data.constants import TRADING_DAYS_PER_YEAR
-from data.processors import log_returns
 from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
+
+from data.constants import TRADING_DAYS_PER_YEAR
+from data.processors import log_returns
 
 from .black_litterman import black_litterman
 from .garch import garch

@@ -3,7 +3,7 @@ from typing import TypeVar
 import numpy as np
 import pandas as pd
 
-from data import RISK_UNACCEPTANCE_VALUE, TRADING_DAYS_PER_YEAR
+from .constants import RISK_UNACCEPTANCE_VALUE, TRADING_DAYS_PER_YEAR
 
 PandasData = TypeVar("PandasData", pd.DataFrame, pd.Series)
 
