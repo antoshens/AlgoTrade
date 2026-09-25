@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from ai import AssetView, MarketViewsReport
+from agents import AssetView, MarketViewsReport
 
 
 @dataclass

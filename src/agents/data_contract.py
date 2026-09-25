@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AssetView(BaseModel):
@@ -25,7 +25,22 @@ class AssetView(BaseModel):
         description="Brief fundamental rationale for the news/reporting view"
     )
 
+    @field_validator("expected_outperformance")
+    @classmethod
+    def clamp_returns(cls, v: float) -> float:
+        # Hard safeguard against extreme figures
+        if abs(v) > 0.20:
+            raise ValueError(
+                f"Expected outperformance {v} exceeds reasonable ±20% annual bounds."
+            )
+        return v
+
 
 class MarketViewsReport(BaseModel):
-    as_of_date: str
-    views: list[AssetView]
+    as_of_date: str = Field(description="Date to which views are formed (YYYY-MM-DD)")
+    views: list[AssetView] = Field(
+        default_factory=list, description="List of formed views"
+    )
+    market_sentiment_summary: str = Field(
+        description="Summary of macro and market background"
+    )
