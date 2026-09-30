@@ -2,6 +2,7 @@ from typing import TypeVar
 
 import numpy as np
 import pandas as pd
+import yfinance as yf
 
 from .constants import RISK_UNACCEPTANCE_VALUE, TRADING_DAYS_PER_YEAR
 
@@ -445,3 +446,56 @@ def calcualte_structural_cost_coupling_value(
     )
 
     return penalty
+
+
+def get_market_weights(stocks: PandasData) -> pd.DataFrame:
+    """Calculate historical market capitalization weights for the given assets.
+
+    Extracts close prices from stock data, fetches the number of shares outstanding
+    for each ticker via Yahoo Finance, computes the historical market capitalization,
+    and normalizes it across all assets at each timestamp so weights sum to 1.0.
+
+    Parameters
+    ----------
+    stocks : pd.DataFrame | pd.Series
+        Historical price data containing 'Close' prices or MultiIndex columns per ticker.
+
+    Returns
+    -------
+    pd.DataFrame
+        Historical market capitalization weights per ticker indexed by Date.
+
+    Raises
+    ------
+    ValueError
+        If stocks input is None.
+    """
+    shares_dict = {}
+
+    if stocks is None:
+        raise ValueError("The stocks input DataFrame is None.")
+
+    stocks = stocks.dropna()
+    if isinstance(stocks, pd.DataFrame) and isinstance(stocks.columns, pd.MultiIndex):
+        level_name = "Price" if "Price" in stocks.columns.names else 1
+        close_prices = stocks.xs("Close", axis=1, level=level_name)
+
+    elif isinstance(stocks, pd.DataFrame) and "Close" in stocks.columns:
+        close_prices = stocks["Close"]
+
+    else:
+        close_prices = stocks
+
+    tickers = list(close_prices.columns)
+    for ticker in tickers:
+        stock = yf.Ticker(ticker)
+
+        # sharesOutstanding or floatShares
+        shares_dict[ticker] = stock.info.get("sharesOutstanding", 1.0)
+
+    shares = pd.Series(shares_dict)
+    market_cap_df = close_prices.multiply(shares, axis=1)
+
+    w_market_history = market_cap_df.divide(market_cap_df.sum(axis=1), axis=0)
+
+    return w_market_history

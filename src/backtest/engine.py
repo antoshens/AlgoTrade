@@ -19,6 +19,7 @@ from data import (
     get_portfolio_exp_vol,
     log_returns,
 )
+from data.processors import get_market_weights
 from src.portfolio import (
     ReturnsModel,
     SharpeRatio,
@@ -249,6 +250,7 @@ def perform_backtesting(
     num_assets = tickers_df.columns.get_level_values(0).nunique()
     log_ret = log_returns(tickers_df)
     portfolio_value = init_portfolio_value
+    all_history_weights = get_market_weights(tickers_df)
 
     # S&P 500
     sp500_close = (
@@ -267,6 +269,7 @@ def perform_backtesting(
         training_sample = tickers_df.iloc[day - lookback_window : day]
         turnover = 1.0
 
+        w_market = np.array(all_history_weights.iloc[day].values)
         log_ret_slice = log_ret.iloc[day - lookback_window : day]
         match l1_penalty_type:
             case "STRUCTURAL_COST":
@@ -300,6 +303,7 @@ def perform_backtesting(
                     prediction_period=rebalancing_period,
                     init_weights=weights_drift,
                     l1_coeff=penalty,
+                    w_market=w_market,
                 )
             case "GARCH_SORTINO":
                 (metric, opt_weights) = find_max_sortino(
@@ -311,6 +315,7 @@ def perform_backtesting(
                     prediction_period=rebalancing_period,
                     init_weights=weights_drift,
                     l1_coeff=penalty,
+                    w_market=w_market,
                 )
             case "EGARCH_SORTINO":
                 (metric, opt_weights) = find_max_sortino(
@@ -322,6 +327,7 @@ def perform_backtesting(
                     prediction_period=1,
                     init_weights=weights_drift,
                     l1_coeff=penalty,
+                    w_market=w_market,
                 )
             case _:
                 raise ValueError(

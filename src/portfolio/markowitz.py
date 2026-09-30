@@ -6,7 +6,7 @@ Provides classical mean-variance optimization (efficient frontier), maximum Shar
 Supports:
 - Covariance models: Sample covariance ('CLASSIC'), Ledoit-Wolf shrinkage ('LEDOIT_WOLF'),
   and univariate (E)GARCH volatility modeling ('GARCH', 'EGARCH').
-- Return models: Historical mean log returns ('HISTORICAL') and Black-Litterman model ('BLACK_LITTERMAN').
+- Return models: Implied equilibrium / reverse optimization returns ('HISTORICAL') and Black-Litterman model ('BLACK_LITTERMAN').
 - Risk-free rate fetching from FRED ('T_BILLS', 'TREASURY_NOTES', 'SOFR').
 - L1 rebalancing turnover penalties to control portfolio drift and transaction costs.
 """
@@ -21,8 +21,8 @@ import pandas as pd
 from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
 
-from data.constants import TRADING_DAYS_PER_YEAR
-from data.processors import log_returns
+from data.constants import RISK_UNACCEPTANCE_VALUE, TRADING_DAYS_PER_YEAR
+from data.processors import get_market_weights, log_returns
 
 from .black_litterman import black_litterman
 from .garch import garch
@@ -62,8 +62,8 @@ ReturnsModel = Literal["HISTORICAL", "BLACK_LITTERMAN"]
 Expected returns estimation model to use.
 
 Options:
-- 'HISTORICAL': Mean historical returns scaled by trading days.
-- 'BLACK_LITTERMAN': Black-Litterman model incorporating market capitalization and investor views.
+- 'HISTORICAL': Implied equilibrium returns derived from market weights and covariance (or GARCH return forecasts).
+- 'BLACK_LITTERMAN': Black-Litterman model incorporating market equilibrium and subjective investor views.
 """
 
 
@@ -188,6 +188,7 @@ def optimize_portfolio(
     bl_tau: float = 0.05,
     prediction_period: int = 1,
     l1_coeff: float = 0.0,
+    w_market: np.ndarray | None = None,
 ) -> pd.DataFrame:
     """
     Calculates the efficient frontier by minimizing volatility across a spectrum of target returns.
@@ -203,7 +204,8 @@ def optimize_portfolio(
         by default 'CLASSIC'.
     returns_model : ReturnsModel, optional
         Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
-        by default 'HISTORICAL'.
+        by default 'HISTORICAL'. When 'HISTORICAL', implied equilibrium returns (or GARCH returns)
+        are used without Black-Litterman subjective views blending.
     opt_type : OptimizationType, optional
         Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'),
         by default 'BACKTEST'.
@@ -220,6 +222,10 @@ def optimize_portfolio(
     l1_coeff : float, optional
         L1 penalty coefficient applied to portfolio turnover (sum of absolute weight differences)
         to penalize excessive rebalancing, by default 0.0.
+    w_market : np.ndarray | None, optional
+        Market capitalization weights vector across assets used to compute CAPM implied
+        equilibrium expected returns. If None, derived from `tickers_df` using `get_market_weights`
+        at the latest date, by default None.
 
     Returns
     -------
@@ -236,7 +242,11 @@ def optimize_portfolio(
     tickers_df = tickers_df.dropna()
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
-    expected_returns = np.array(log_ret_df.mean(axis=0) * TRADING_DAYS_PER_YEAR)
+    w_market = (
+        get_market_weights(tickers_df).loc[tickers_df.index[-1]].values
+        if w_market is None
+        else w_market
+    )
 
     # Defining optimization type
     match opt_type:
@@ -265,10 +275,16 @@ def optimize_portfolio(
             cov_matrix = np.array(
                 log_ret_df.cov() * TRADING_DAYS_PER_YEAR
             )  # assets covariance matrix # type: ignore
+            expected_returns = (
+                RISK_UNACCEPTANCE_VALUE * (cov_matrix @ w_market) + risk_free_rate
+            )
         case "LEDOIT_WOLF":
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+            expected_returns = (
+                RISK_UNACCEPTANCE_VALUE * (cov_matrix @ w_market) + risk_free_rate
+            )
         case "GARCH" | "EGARCH":
             lw = LedoitWolf()
             lw.fit(log_ret)
@@ -464,6 +480,7 @@ def find_max_sharpe(
     prediction_period: int = 1,
     init_weights: np.ndarray | None = None,
     l1_coeff: float = 0.0,
+    w_market: np.ndarray | None = None,
 ) -> tuple[SharpeRatio, pd.DataFrame]:
     """
     Optimizes portfolio weights to maximize the Sharpe ratio (find the tangency portfolio).
@@ -479,7 +496,8 @@ def find_max_sharpe(
         by default 'CLASSIC'.
     returns_model : ReturnsModel, optional
         Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
-        by default 'HISTORICAL'.
+        by default 'HISTORICAL'. When 'HISTORICAL', implied equilibrium returns (or GARCH returns)
+        are used without Black-Litterman subjective views blending.
     opt_type : OptimizationType, optional
         Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'), by default BACKTEST.
     views : np.ndarray | None, optional
@@ -500,6 +518,10 @@ def find_max_sharpe(
     l1_coeff : float, optional
         L1 penalty coefficient applied to portfolio turnover (||w - w_init||_1)
         to penalize excessive rebalancing, by default 0.0.
+    w_market : np.ndarray | None, optional
+        Market capitalization weights vector across assets used to compute CAPM implied
+        equilibrium expected returns. If None, derived from `tickers_df` using `get_market_weights`
+        at the latest date, by default None.
 
     Returns
     -------
@@ -523,7 +545,11 @@ def find_max_sharpe(
     num_assets = tickers_df.columns.get_level_values(0).nunique()
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
-    expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
+    w_market = (
+        get_market_weights(tickers_df).loc[tickers_df.index[-1]].values
+        if w_market is None
+        else w_market
+    )
 
     if init_weights is None:
         init_weights = np.ones(num_assets) / num_assets
@@ -558,10 +584,16 @@ def find_max_sharpe(
             cov_matrix = np.array(
                 log_ret_df.cov() * TRADING_DAYS_PER_YEAR
             )  # assets covariance matrix # type: ignore
+            expected_returns = (
+                RISK_UNACCEPTANCE_VALUE * (cov_matrix @ w_market) + risk_free_rate
+            )
         case "LEDOIT_WOLF":
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+            expected_returns = (
+                RISK_UNACCEPTANCE_VALUE * (cov_matrix @ w_market) + risk_free_rate
+            )
         case "GARCH" | "EGARCH":
             lw = LedoitWolf()
             lw.fit(log_ret)
@@ -717,7 +749,7 @@ def _max_sharpe_objective(
     Returns
     -------
     float
-        The negative Sharpe ratio of the portfolio.
+        Penalized negative Sharpe ratio: -((Return - RiskFreeRate) / Volatility - penalty).
     """
     ret = np.dot(weights, expected_returns)
     vol = np.sqrt(weights.T @ cov_matrix @ weights)
@@ -741,6 +773,7 @@ def find_max_sortino(
     prediction_period: int = 1,
     init_weights: np.ndarray | None = None,
     l1_coeff: float = 0.0,
+    w_market: np.ndarray | None = None,
 ) -> tuple[SortinoRatio, pd.DataFrame]:
     """
     Optimizes portfolio weights to maximize the Sortino ratio (minimizing downside volatility).
@@ -756,7 +789,8 @@ def find_max_sortino(
         by default 'CLASSIC'.
     returns_model : ReturnsModel, optional
         Expected returns estimation model to use ('HISTORICAL' or 'BLACK_LITTERMAN'),
-        by default 'HISTORICAL'.
+        by default 'HISTORICAL'. When 'HISTORICAL', implied equilibrium returns (or GARCH returns)
+        are used without Black-Litterman subjective views blending.
     opt_type : OptimizationType, optional
         Determines the date range for fetching the risk-free rate ('BACKTEST' or 'LIVE'),
         by default 'BACKTEST'.
@@ -778,6 +812,10 @@ def find_max_sortino(
     l1_coeff : float, optional
         L1 penalty coefficient applied to portfolio turnover (||w - w_init||_1)
         to penalize excessive rebalancing, by default 0.0.
+    w_market : np.ndarray | None, optional
+        Market capitalization weights vector across assets used to compute CAPM implied
+        equilibrium expected returns. If None, derived from `tickers_df` using `get_market_weights`
+        at the latest date, by default None.
 
     Returns
     -------
@@ -801,7 +839,11 @@ def find_max_sortino(
     num_assets = tickers_df.columns.get_level_values(0).nunique()
     log_ret_df = log_returns(tickers_df)
     log_ret = np.array(log_ret_df)
-    expected_returns = np.array(log_ret.mean(axis=0) * TRADING_DAYS_PER_YEAR)
+    w_market = (
+        get_market_weights(tickers_df).loc[tickers_df.index[-1]].values
+        if w_market is None
+        else w_market
+    )
 
     if init_weights is None:
         init_weights = np.ones(num_assets) / num_assets
@@ -836,10 +878,16 @@ def find_max_sortino(
             cov_matrix = np.array(
                 log_ret_df.cov() * TRADING_DAYS_PER_YEAR
             )  # assets covariance matrix # type: ignore
+            expected_returns = (
+                RISK_UNACCEPTANCE_VALUE * (cov_matrix @ w_market) + risk_free_rate
+            )
         case "LEDOIT_WOLF":
             lw = LedoitWolf()
             lw.fit(log_ret)
             cov_matrix = np.array(lw.covariance_ * TRADING_DAYS_PER_YEAR)
+            expected_returns = (
+                RISK_UNACCEPTANCE_VALUE * (cov_matrix @ w_market) + risk_free_rate
+            )
         case "GARCH" | "EGARCH":
             lw = LedoitWolf()
             lw.fit(log_ret)
@@ -1001,7 +1049,7 @@ def _max_sortino_objective(
     Returns
     -------
     float
-        The negative Sortino ratio of the portfolio.
+        Penalized negative Sortino ratio: -((Return - RiskFreeRate) / DownsideVolatility - penalty).
     """
     ret = np.dot(weights, expected_returns)
 
