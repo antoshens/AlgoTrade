@@ -1,0 +1,48 @@
+{
+    "bullish_nvda": {
+        "as_of_date": "2026-03-15",
+        "news": {
+            "NVDA": [
+                "Q4 earnings beat consensus by 14%; Data Center revenue up 85% YoY.",
+                "Management raises full-year gross margin guidance to 76% citing next-gen architecture acceleration.",
+                "Tier-1 cloud hyperscalers commit multi-billion capex expansion for custom AI clusters."
+            ],
+            "MSFT": [
+                "Azure growth matches consensus expectations at 29% YoY.",
+                "Capital expenditures increased in line with prior quarter outlook."
+            ],
+            "AAPL": [
+                "Foxconn reports stable assembly volumes for existing smartphone lineups."
+            ],
+            "GOOGL": [
+                "Search advertising revenue trends remain consistent with historical seasonality."
+            ]
+        }
+    },
+    "bearish_aapl": {
+        "as_of_date": "2026-06-20",
+        "news": {
+            "AAPL": [
+                "Antitrust regulatory ruling mandates 12% cut in App Store commission fees across Europe and Asia.",
+                "Key Asian supplier notes a 15% reduction in display component orders for the upcoming quarter.",
+                "Multiple brokerages downgrade stock from Overweight to Neutral citing margin compression."
+            ],
+            "NVDA": ["Trading in line with broader semiconductor index."],
+            "MSFT": ["Enterprise software renewal rates remain resilient at 96%."],
+            "GOOGL": [
+                "Cloud operating margins turn positive; enterprise subscriptions expand."
+            ]
+        }
+    },
+    "neutral_noise": {
+        "as_of_date": "2026-09-10",
+        "news": {
+            "AAPL": ["CEO attends annual charity foundation gala in New York."],
+            "MSFT": ["Minor update pushed to Windows enterprise productivity suite."],
+            "NVDA": [
+                "Semiconductor trade conference concludes without new product announcements."
+            ],
+            "GOOGL": ["New regional office opening announced in Dublin."]
+        }
+    }
+}

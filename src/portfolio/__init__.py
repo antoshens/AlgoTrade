@@ -14,6 +14,7 @@ from .markowitz import (
     get_risk_free_rate,
     optimize_portfolio,
 )
+from .mocks.markowitz_mock import find_max_sharpe_mocked_data
 
 __all__ = [
     "ArchType",
@@ -25,6 +26,7 @@ __all__ = [
     "SortinoRatio",
     "black_litterman",
     "find_max_sharpe",
+    "find_max_sharpe_mocked_data",
     "find_max_sortino",
     "garch",
     "get_risk_free_rate",
